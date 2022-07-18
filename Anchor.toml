@@ -1,6 +1,11 @@
 [features]
 seeds = true
 
+[test.validator]
+url = "https://api.devnet.solana.com"
+[[test.validator.clone]]
+address = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+
 [programs.localnet]
 disco = "EJQnbXhsLS92wsAXg1vPaZt88hfzmuhcqBVLQBn9h23x"
 
