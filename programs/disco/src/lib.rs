@@ -105,11 +105,11 @@ pub struct CreateEvent<'info> {
         mut,
         seeds = [
             b"metadata".as_ref(),
-            mpl_token_metadata::ID.as_ref(),
+            metadata_program.key().as_ref(),
             ticket_mint.key().as_ref(),
         ],
         bump,
-        seeds::program = mpl_token_metadata::ID
+        seeds::program = metadata_program.key()
     )]
     pub ticket_metadata: UncheckedAccount<'info>,
 }
