@@ -29,6 +29,7 @@ pub mod disco {
     ) -> Result<()> {
         (*ctx.accounts.event_ticket).price = ticket_price;
         (*ctx.accounts.event_ticket).quantity = ticket_quantity;
+        (*ctx.accounts.event_ticket).sold = 0;
         (*ctx.accounts.event_ticket).bump = *ctx.bumps.get("event_ticket").unwrap();
         (*ctx.accounts.event_ticket).ticket_mint_bump = *ctx.bumps.get("ticket_mint").unwrap();
         (*ctx.accounts.event_ticket).ticket_metadata_bump =
@@ -74,6 +75,8 @@ pub mod disco {
     }
 
     pub fn buy_tickets(ctx: Context<BuyTickets>, ticket_quantity: u32) -> Result<()> {
+        (*ctx.accounts.event_ticket).sold += ticket_quantity;
+
         // call transfer from authority to event vault
         transfer(
             CpiContext::new(
@@ -184,7 +187,7 @@ pub struct CreateEventTicket<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + 4 + 4 + 1 + 1 + 1,
+        space = 8 + 4 + 4 + 4 + 1 + 1 + 1,
         seeds = [
             b"event_ticket".as_ref(),
             event.key().as_ref(),
@@ -243,6 +246,7 @@ pub struct BuyTickets<'info> {
     /// CHECK: This is used only for generating the PDA.
     pub event_ticket_base: UncheckedAccount<'info>,
     #[account(
+        mut,
         seeds = [
             b"event_ticket".as_ref(),
             event.key().as_ref(),
@@ -294,6 +298,7 @@ pub struct Event {
 pub struct EventTicket {
     pub price: u32,
     pub quantity: u32,
+    pub sold: u32,
     pub bump: u8,
     pub ticket_mint_bump: u8,
     pub ticket_metadata_bump: u8,

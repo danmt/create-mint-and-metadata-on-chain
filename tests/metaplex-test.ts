@@ -174,6 +174,7 @@ describe("disco", () => {
       .run();
     assert.equal(eventGeneralTicketAccount.price, ticketPrice);
     assert.equal(eventGeneralTicketAccount.quantity, ticketQuantity);
+    assert.equal(eventGeneralTicketAccount.sold, 0);
     assert.isDefined(ticketMintAccount);
     assert.equal(ticketMintAccount.decimals, 0);
     assert.equal(ticketMintAccount.supply, BigInt(0));
@@ -225,6 +226,7 @@ describe("disco", () => {
       .run();
     assert.equal(eventVipTicketAccount.price, ticketPrice);
     assert.equal(eventVipTicketAccount.quantity, ticketQuantity);
+    assert.equal(eventVipTicketAccount.sold, 0);
     assert.isDefined(ticketMintAccount);
     assert.equal(ticketMintAccount.decimals, 0);
     assert.equal(ticketMintAccount.supply, BigInt(0));
@@ -258,6 +260,12 @@ describe("disco", () => {
     const beforeVipTicketMintAccount = await getMint(
       provider.connection,
       eventVipTicketMintPublicKey
+    );
+    const beforeEventGeneralTicketAccount = await program.account.eventTicket.fetch(
+      eventGeneralTicketPublicKey
+    );
+    const beforeEventVipTicketAccount = await program.account.eventTicket.fetch(
+      eventVipTicketPublicKey
     );
     // act
     await provider.sendAndConfirm(
@@ -301,11 +309,10 @@ describe("disco", () => {
         .rpc(),
     ]);
     // assert
-    const eventAccount = await program.account.event.fetch(eventPublicKey);
-    const eventGeneralTicketAccount = await program.account.eventTicket.fetch(
+    const afterEventGeneralTicketAccount = await program.account.eventTicket.fetch(
       eventGeneralTicketPublicKey
     );
-    const eventVipTicketAccount = await program.account.eventTicket.fetch(
+    const afterEventVipTicketAccount = await program.account.eventTicket.fetch(
       eventVipTicketPublicKey
     );
     const afterAliceAccount = await getAccount(
@@ -324,34 +331,39 @@ describe("disco", () => {
       provider.connection,
       eventVipTicketMintPublicKey
     );
-    const aliceGeneralTicketReceiverAccount = await getAccount(
+    const aliceGeneralTicketVaultAccount = await getAccount(
       provider.connection,
       aliceGeneralTicketAssociatedTokenPublicKey
     );
-    const aliceVipTicketReceiverAccount = await getAccount(
+    const aliceVipTicketVaultAccount = await getAccount(
       provider.connection,
       aliceVipTicketAssociatedTokenPublicKey
     );
-    assert.isDefined(eventAccount);
+
+    // Assert alice vault changed
     assert.isDefined(beforeAliceAccount);
     assert.isDefined(afterAliceAccount);
     assert.equal(
       afterAliceAccount.amount,
       beforeAliceAccount.amount -
-        (BigInt(generalTicketQuantity * eventGeneralTicketAccount.price) +
-          BigInt(vipTicketQuantity * eventVipTicketAccount.price))
+        (BigInt(generalTicketQuantity * afterEventGeneralTicketAccount.price) +
+          BigInt(vipTicketQuantity * afterEventVipTicketAccount.price))
     );
+
+    // Assert event vault changed
     assert.isDefined(beforeEventVaultAccount);
     assert.isDefined(afterEventVaultAccount);
     assert.equal(
       afterEventVaultAccount.amount,
       beforeEventVaultAccount.amount +
-        (BigInt(generalTicketQuantity * eventGeneralTicketAccount.price) +
-          BigInt(vipTicketQuantity * eventVipTicketAccount.price))
+        (BigInt(generalTicketQuantity * afterEventGeneralTicketAccount.price) +
+          BigInt(vipTicketQuantity * afterEventVipTicketAccount.price))
     );
-    assert.isDefined(aliceGeneralTicketReceiverAccount);
+
+    // Assert general ticket values changed
+    assert.isDefined(aliceGeneralTicketVaultAccount);
     assert.equal(
-      aliceGeneralTicketReceiverAccount.amount,
+      aliceGeneralTicketVaultAccount.amount,
       BigInt(generalTicketQuantity)
     );
     assert.isDefined(beforeGeneralTicketMintAccount);
@@ -360,9 +372,15 @@ describe("disco", () => {
       afterGeneralTicketMintAccount.supply,
       beforeGeneralTicketMintAccount.supply + BigInt(generalTicketQuantity)
     );
-    assert.isDefined(aliceVipTicketReceiverAccount);
     assert.equal(
-      aliceVipTicketReceiverAccount.amount,
+      afterEventGeneralTicketAccount.sold,
+      beforeEventGeneralTicketAccount.sold + generalTicketQuantity
+    );
+
+    // Assert VIP ticket values changed
+    assert.isDefined(aliceVipTicketVaultAccount);
+    assert.equal(
+      aliceVipTicketVaultAccount.amount,
       BigInt(vipTicketQuantity)
     );
     assert.isDefined(beforeVipTicketMintAccount);
@@ -370,6 +388,10 @@ describe("disco", () => {
     assert.equal(
       afterVipTicketMintAccount.supply,
       beforeVipTicketMintAccount.supply + BigInt(vipTicketQuantity)
+    );
+    assert.equal(
+      afterEventVipTicketAccount.sold,
+      beforeEventVipTicketAccount.sold + vipTicketQuantity
     );
   });
 });
