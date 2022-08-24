@@ -104,7 +104,7 @@ pub mod disco {
                 ctx.accounts.token_program.to_account_info(),
                 MintTo {
                     mint: ctx.accounts.ticket_mint.to_account_info(),
-                    to: ctx.accounts.ticket_associated_token.to_account_info(),
+                    to: ctx.accounts.ticket_vault.to_account_info(),
                     authority: ctx.accounts.event.to_account_info(),
                 },
                 &[&seeds[..]],
@@ -252,10 +252,6 @@ pub struct BuyTickets<'info> {
     )]
     pub event_ticket: Account<'info, EventTicket>,
     #[account(
-        constraint = accepted_mint.key() == event.accepted_mint
-    )]
-    pub accepted_mint: Account<'info, Mint>,
-    #[account(
         mut,
         constraint = buyer_vault.mint == event.accepted_mint
     )]
@@ -279,8 +275,11 @@ pub struct BuyTickets<'info> {
         bump = event_ticket.ticket_mint_bump
     )]
     pub ticket_mint: Account<'info, Mint>,
-    #[account(mut)]
-    pub ticket_associated_token: Box<Account<'info, TokenAccount>>,
+    #[account(
+        mut,
+        constraint = ticket_vault.mint == ticket_mint.key()
+    )]
+    pub ticket_vault: Box<Account<'info, TokenAccount>>,
 }
 
 #[account]

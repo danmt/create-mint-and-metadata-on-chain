@@ -283,9 +283,8 @@ describe("disco", () => {
           authority: aliceKeypair.publicKey,
           eventBase: eventBaseKeypair.publicKey,
           eventTicketBase: eventGeneralTicketBaseKeypair.publicKey,
-          acceptedMint: acceptedMintPublicKey,
           buyerVault: aliceAssociatedWalletPublicKey,
-          ticketAssociatedToken: aliceGeneralTicketAssociatedTokenPublicKey,
+          ticketVault: aliceGeneralTicketAssociatedTokenPublicKey,
         })
         .signers([aliceKeypair])
         .rpc(),
@@ -295,9 +294,8 @@ describe("disco", () => {
           authority: aliceKeypair.publicKey,
           eventBase: eventBaseKeypair.publicKey,
           eventTicketBase: eventVipTicketBaseKeypair.publicKey,
-          acceptedMint: acceptedMintPublicKey,
           buyerVault: aliceAssociatedWalletPublicKey,
-          ticketAssociatedToken: aliceVipTicketAssociatedTokenPublicKey,
+          ticketVault: aliceVipTicketAssociatedTokenPublicKey,
         })
         .signers([aliceKeypair])
         .rpc(),
