@@ -1,5 +1,8 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{mint_to, transfer, Mint, MintTo, Token, TokenAccount, Transfer};
+use anchor_spl::{
+    associated_token::AssociatedToken,
+    token::{mint_to, transfer, Mint, MintTo, Token, TokenAccount, Transfer},
+};
 
 declare_id!("EJQnbXhsLS92wsAXg1vPaZt88hfzmuhcqBVLQBn9h23x");
 
@@ -76,7 +79,7 @@ pub mod disco {
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
                 Transfer {
-                    from: ctx.accounts.payer_token.to_account_info(),
+                    from: ctx.accounts.buyer_vault.to_account_info(),
                     to: ctx.accounts.event_vault.to_account_info(),
                     authority: ctx.accounts.authority.to_account_info(),
                 },
@@ -101,7 +104,7 @@ pub mod disco {
                 ctx.accounts.token_program.to_account_info(),
                 MintTo {
                     mint: ctx.accounts.ticket_mint.to_account_info(),
-                    to: ctx.accounts.ticket_receiver.to_account_info(),
+                    to: ctx.accounts.ticket_associated_token.to_account_info(),
                     authority: ctx.accounts.event.to_account_info(),
                 },
                 &[&seeds[..]],
@@ -223,6 +226,7 @@ pub struct BuyTickets<'info> {
     /// CHECK: this is verified through an address constraint>
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub rent: Sysvar<'info, Rent>,
     #[account(mut)]
     pub authority: Signer<'info>,
@@ -253,9 +257,9 @@ pub struct BuyTickets<'info> {
     pub accepted_mint: Account<'info, Mint>,
     #[account(
         mut,
-        constraint = payer_token.mint == event.accepted_mint
+        constraint = buyer_vault.mint == event.accepted_mint
     )]
-    pub payer_token: Account<'info, TokenAccount>,
+    pub buyer_vault: Account<'info, TokenAccount>,
     #[account(
         mut,
         seeds = [
@@ -275,19 +279,8 @@ pub struct BuyTickets<'info> {
         bump = event_ticket.ticket_mint_bump
     )]
     pub ticket_mint: Account<'info, Mint>,
-    #[account(
-        init_if_needed,
-        payer = authority,
-        token::authority = authority,
-        token::mint = ticket_mint,
-        seeds = [
-            b"ticket_receiver".as_ref(),
-            authority.key().as_ref(),
-            ticket_mint.key().as_ref(),
-        ],
-        bump
-    )]
-    pub ticket_receiver: Box<Account<'info, TokenAccount>>,
+    #[account(mut)]
+    pub ticket_associated_token: Box<Account<'info, TokenAccount>>,
 }
 
 #[account]

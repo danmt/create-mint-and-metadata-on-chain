@@ -6,7 +6,12 @@ import {
 } from "@metaplex-foundation/js";
 import * as anchor from "@project-serum/anchor";
 import { Program } from "@project-serum/anchor";
-import { getAccount, getMint } from "@solana/spl-token";
+import {
+  createAssociatedTokenAccountInstruction,
+  getAccount,
+  getAssociatedTokenAddress,
+  getMint,
+} from "@solana/spl-token";
 import { assert } from "chai";
 import { Disco } from "../target/types/disco";
 import {
@@ -35,8 +40,8 @@ describe("disco", () => {
   let aliceAssociatedWalletPublicKey: anchor.web3.PublicKey;
   let eventPublicKey: anchor.web3.PublicKey;
   let eventVaultPublicKey: anchor.web3.PublicKey;
-  let aliceGeneralTicketReceiverPublicKey: anchor.web3.PublicKey;
-  let aliceVipTicketReceiverPublicKey: anchor.web3.PublicKey;
+  let aliceGeneralTicketAssociatedTokenPublicKey: anchor.web3.PublicKey;
+  let aliceVipTicketAssociatedTokenPublicKey: anchor.web3.PublicKey;
   let acceptedMintPublicKey: anchor.web3.PublicKey;
   let eventGeneralTicketPublicKey: anchor.web3.PublicKey;
   let eventVipTicketPublicKey: anchor.web3.PublicKey;
@@ -96,24 +101,15 @@ describe("disco", () => {
       aliceBalance,
       aliceKeypair
     );
-    [aliceGeneralTicketReceiverPublicKey] =
-      await anchor.web3.PublicKey.findProgramAddress(
-        [
-          Buffer.from("ticket_receiver", "utf-8"),
-          aliceKeypair.publicKey.toBuffer(),
-          eventGeneralTicketMintPublicKey.toBuffer(),
-        ],
-        program.programId
+    aliceGeneralTicketAssociatedTokenPublicKey =
+      await getAssociatedTokenAddress(
+        eventGeneralTicketMintPublicKey,
+        aliceKeypair.publicKey
       );
-    [aliceVipTicketReceiverPublicKey] =
-      await anchor.web3.PublicKey.findProgramAddress(
-        [
-          Buffer.from("ticket_receiver", "utf-8"),
-          aliceKeypair.publicKey.toBuffer(),
-          eventVipTicketMintPublicKey.toBuffer(),
-        ],
-        program.programId
-      );
+    aliceVipTicketAssociatedTokenPublicKey = await getAssociatedTokenAddress(
+      eventVipTicketMintPublicKey,
+      aliceKeypair.publicKey
+    );
   });
 
   it("should create Tomorrowland 2022 event", async () => {
@@ -264,6 +260,22 @@ describe("disco", () => {
       eventVipTicketMintPublicKey
     );
     // act
+    await provider.sendAndConfirm(
+      new anchor.web3.Transaction().add(
+        createAssociatedTokenAccountInstruction(
+          provider.wallet.publicKey,
+          aliceGeneralTicketAssociatedTokenPublicKey,
+          aliceKeypair.publicKey,
+          eventGeneralTicketMintPublicKey
+        ),
+        createAssociatedTokenAccountInstruction(
+          provider.wallet.publicKey,
+          aliceVipTicketAssociatedTokenPublicKey,
+          aliceKeypair.publicKey,
+          eventVipTicketMintPublicKey
+        )
+      )
+    );
     await Promise.all([
       program.methods
         .buyTickets(generalTicketQuantity)
@@ -272,7 +284,8 @@ describe("disco", () => {
           eventBase: eventBaseKeypair.publicKey,
           eventTicketBase: eventGeneralTicketBaseKeypair.publicKey,
           acceptedMint: acceptedMintPublicKey,
-          payerToken: aliceAssociatedWalletPublicKey,
+          buyerVault: aliceAssociatedWalletPublicKey,
+          ticketAssociatedToken: aliceGeneralTicketAssociatedTokenPublicKey,
         })
         .signers([aliceKeypair])
         .rpc(),
@@ -283,7 +296,8 @@ describe("disco", () => {
           eventBase: eventBaseKeypair.publicKey,
           eventTicketBase: eventVipTicketBaseKeypair.publicKey,
           acceptedMint: acceptedMintPublicKey,
-          payerToken: aliceAssociatedWalletPublicKey,
+          buyerVault: aliceAssociatedWalletPublicKey,
+          ticketAssociatedToken: aliceVipTicketAssociatedTokenPublicKey,
         })
         .signers([aliceKeypair])
         .rpc(),
@@ -314,11 +328,11 @@ describe("disco", () => {
     );
     const aliceGeneralTicketReceiverAccount = await getAccount(
       provider.connection,
-      aliceGeneralTicketReceiverPublicKey
+      aliceGeneralTicketAssociatedTokenPublicKey
     );
     const aliceVipTicketReceiverAccount = await getAccount(
       provider.connection,
-      aliceVipTicketReceiverPublicKey
+      aliceVipTicketAssociatedTokenPublicKey
     );
     assert.isDefined(eventAccount);
     assert.isDefined(beforeAliceAccount);
@@ -334,8 +348,8 @@ describe("disco", () => {
     assert.equal(
       afterEventVaultAccount.amount,
       beforeEventVaultAccount.amount +
-      (BigInt(generalTicketQuantity * eventGeneralTicketAccount.price) +
-      BigInt(vipTicketQuantity * eventVipTicketAccount.price))
+        (BigInt(generalTicketQuantity * eventGeneralTicketAccount.price) +
+          BigInt(vipTicketQuantity * eventVipTicketAccount.price))
     );
     assert.isDefined(aliceGeneralTicketReceiverAccount);
     assert.equal(
