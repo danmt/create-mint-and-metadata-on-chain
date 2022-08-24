@@ -165,7 +165,7 @@ pub struct CreateEvent<'info> {
 )]
 pub struct CreateEventTicket<'info> {
     /// CHECK: this is verified through an address constraint
-    #[account(address = mpl_token_metadata::ID)]
+    #[account(address = mpl_token_metadata::ID, executable)]
     pub metadata_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
@@ -226,7 +226,6 @@ pub struct CreateEventTicket<'info> {
 #[derive(Accounts)]
 #[instruction(ticket_quantity: u32)]
 pub struct BuyTickets<'info> {
-    /// CHECK: this is verified through an address constraint>
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
@@ -252,7 +251,8 @@ pub struct BuyTickets<'info> {
             event.key().as_ref(),
             event_ticket_base.key().as_ref(),
         ],
-        bump = event_ticket.bump
+        bump = event_ticket.bump,
+        constraint = event_ticket.quantity >= event_ticket.sold + ticket_quantity @ ErrorCode::NotEnoughTicketsAvailable
     )]
     pub event_ticket: Account<'info, EventTicket>,
     #[account(
@@ -302,4 +302,10 @@ pub struct EventTicket {
     pub bump: u8,
     pub ticket_mint_bump: u8,
     pub ticket_metadata_bump: u8,
+}
+
+#[error_code]
+pub enum ErrorCode {
+    #[msg("There are not enough tickets available.")]
+    NotEnoughTicketsAvailable,
 }

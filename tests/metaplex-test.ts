@@ -5,7 +5,7 @@ import {
   walletAdapterIdentity,
 } from "@metaplex-foundation/js";
 import * as anchor from "@project-serum/anchor";
-import { Program } from "@project-serum/anchor";
+import { AnchorError, Program } from "@project-serum/anchor";
 import {
   createAssociatedTokenAccountInstruction,
   getAccount,
@@ -261,9 +261,8 @@ describe("disco", () => {
       provider.connection,
       eventVipTicketMintPublicKey
     );
-    const beforeEventGeneralTicketAccount = await program.account.eventTicket.fetch(
-      eventGeneralTicketPublicKey
-    );
+    const beforeEventGeneralTicketAccount =
+      await program.account.eventTicket.fetch(eventGeneralTicketPublicKey);
     const beforeEventVipTicketAccount = await program.account.eventTicket.fetch(
       eventVipTicketPublicKey
     );
@@ -309,9 +308,8 @@ describe("disco", () => {
         .rpc(),
     ]);
     // assert
-    const afterEventGeneralTicketAccount = await program.account.eventTicket.fetch(
-      eventGeneralTicketPublicKey
-    );
+    const afterEventGeneralTicketAccount =
+      await program.account.eventTicket.fetch(eventGeneralTicketPublicKey);
     const afterEventVipTicketAccount = await program.account.eventTicket.fetch(
       eventVipTicketPublicKey
     );
@@ -379,10 +377,7 @@ describe("disco", () => {
 
     // Assert VIP ticket values changed
     assert.isDefined(aliceVipTicketVaultAccount);
-    assert.equal(
-      aliceVipTicketVaultAccount.amount,
-      BigInt(vipTicketQuantity)
-    );
+    assert.equal(aliceVipTicketVaultAccount.amount, BigInt(vipTicketQuantity));
     assert.isDefined(beforeVipTicketMintAccount);
     assert.isDefined(afterVipTicketMintAccount);
     assert.equal(
@@ -393,5 +388,82 @@ describe("disco", () => {
       afterEventVipTicketAccount.sold,
       beforeEventVipTicketAccount.sold + vipTicketQuantity
     );
+  });
+
+  it("should fail when there are not enough tickets available", async () => {
+    // arrange
+    let error: AnchorError;
+    const ticketName = "Tomorrowland 2022 - Ultra VIP";
+    const ticketSymbol = "TMRLND2022";
+    const ticketURI = "https://www.gooogle.com";
+    const ticketPrice = 5;
+    const ticketQuantity = 1;
+    const ticketToBuy = 2;
+    const eventUltraVipTicketBaseKeypair = anchor.web3.Keypair.generate();
+    const [eventUltraVipTicketPublicKey] =
+      await anchor.web3.PublicKey.findProgramAddress(
+        [
+          Buffer.from("event_ticket", "utf-8"),
+          eventPublicKey.toBuffer(),
+          eventUltraVipTicketBaseKeypair.publicKey.toBuffer(),
+        ],
+        program.programId
+      );
+    const [eventUltraVipTicketMintPublicKey] =
+      await anchor.web3.PublicKey.findProgramAddress(
+        [
+          Buffer.from("ticket_mint", "utf-8"),
+          eventPublicKey.toBuffer(),
+          eventUltraVipTicketPublicKey.toBuffer(),
+        ],
+        program.programId
+      );
+    const aliceUltraVipTicketAssociatedTokenPublicKey =
+      await getAssociatedTokenAddress(
+        eventUltraVipTicketMintPublicKey,
+        aliceKeypair.publicKey
+      );
+    // act
+    try {
+      await program.methods
+        .buyTickets(ticketToBuy)
+        .accounts({
+          authority: aliceKeypair.publicKey,
+          eventBase: eventBaseKeypair.publicKey,
+          eventTicketBase: eventUltraVipTicketBaseKeypair.publicKey,
+          buyerVault: aliceAssociatedWalletPublicKey,
+          ticketVault: aliceUltraVipTicketAssociatedTokenPublicKey,
+        })
+        .preInstructions([
+          await program.methods
+            .createEventTicket(
+              ticketName,
+              ticketSymbol,
+              ticketURI,
+              ticketPrice,
+              ticketQuantity
+            )
+            .accounts({
+              authority: provider.wallet.publicKey,
+              eventBase: eventBaseKeypair.publicKey,
+              eventTicketBase: eventUltraVipTicketBaseKeypair.publicKey,
+              metadataProgram: metadataProgramPublicKey,
+            })
+            .instruction(),
+          createAssociatedTokenAccountInstruction(
+            provider.wallet.publicKey,
+            aliceUltraVipTicketAssociatedTokenPublicKey,
+            aliceKeypair.publicKey,
+            eventUltraVipTicketMintPublicKey
+          ),
+        ])
+        .signers([aliceKeypair])
+        .rpc();
+    } catch (err) {
+      error = err;
+    }
+    // assert
+    assert.isDefined(error);
+    assert.equal(error.error.errorCode.code, 'NotEnoughTicketsAvailable');
   });
 });
