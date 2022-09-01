@@ -10,11 +10,86 @@ declare_id!("EJQnbXhsLS92wsAXg1vPaZt88hfzmuhcqBVLQBn9h23x");
 pub mod disco {
     use super::*;
 
-    pub fn create_event(ctx: Context<CreateEvent>, event_title: String) -> Result<()> {
+    pub fn create_event(
+        ctx: Context<CreateEvent>,
+        event_title: String,
+        fee_vault_amount: u64,
+    ) -> Result<()> {
         (*ctx.accounts.event).event_title = event_title.clone();
         (*ctx.accounts.event).accepted_mint = ctx.accounts.accepted_mint.key();
+        (*ctx.accounts.event).authority = ctx.accounts.authority.key();
         (*ctx.accounts.event).bump = *ctx.bumps.get("event").unwrap();
         (*ctx.accounts.event).event_vault_bump = *ctx.bumps.get("event_vault").unwrap();
+        (*ctx.accounts.event).fee_vault_bump = *ctx.bumps.get("fee_vault").unwrap();
+        (*ctx.accounts.event).total_fee_vault_deposited = fee_vault_amount;
+        (*ctx.accounts.event).total_fee_vault_value_locked = fee_vault_amount;
+
+        solana_program::program::invoke(
+            &solana_program::system_instruction::transfer(
+                &ctx.accounts.authority.key(),
+                &ctx.accounts.fee_vault.key(),
+                fee_vault_amount,
+            ),
+            &[
+                ctx.accounts.authority.to_account_info().clone(),
+                ctx.accounts.fee_vault.to_account_info().clone(),
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn deposit_in_fee_vault(ctx: Context<DepositInFeeVault>, amount: u64) -> Result<()> {
+        (*ctx.accounts.event).total_fee_vault_deposited += amount;
+        (*ctx.accounts.event).total_fee_vault_value_locked += amount;
+
+        solana_program::program::invoke(
+            &solana_program::system_instruction::transfer(
+                &ctx.accounts.authority.key(),
+                &ctx.accounts.fee_vault.key(),
+                amount,
+            ),
+            &[
+                ctx.accounts.authority.to_account_info().clone(),
+                ctx.accounts.fee_vault.to_account_info().clone(),
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn withdraw_from_fee_vault(ctx: Context<WithdrawFromFeeVault>, amount: u64) -> Result<()> {
+        (*ctx.accounts.event).total_fee_vault_value_locked -= amount;
+
+        let seeds = &[
+            b"fee_vault".as_ref(),
+            ctx.accounts.event.to_account_info().key.as_ref(),
+            &[ctx.accounts.event.fee_vault_bump],
+        ];
+
+        /* **ctx
+            .accounts
+            .fee_vault
+            .to_account_info()
+            .try_borrow_mut_lamports()? -= amount;
+        **ctx
+            .accounts
+            .authority
+            .to_account_info()
+            .try_borrow_mut_lamports()? += amount; */
+
+        solana_program::program::invoke_signed(
+            &solana_program::system_instruction::transfer(
+                &ctx.accounts.fee_vault.key(),
+                &ctx.accounts.authority.key(),
+                amount,
+            ),
+            &[
+                ctx.accounts.fee_vault.to_account_info().clone(),
+                ctx.accounts.authority.to_account_info().clone(),
+            ],
+            &[&seeds[..]],
+        )?;
 
         Ok(())
     }
@@ -120,7 +195,7 @@ pub mod disco {
 }
 
 #[derive(Accounts)]
-#[instruction(event_title: String)]
+#[instruction(event_title: String, fee_vault_amount: u64)]
 pub struct CreateEvent<'info> {
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
@@ -132,7 +207,7 @@ pub struct CreateEvent<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + 36 + 32 + 1 + 1,
+        space = 8 + 36 + 32 + 32 + 8 + 8 + 1 + 1 + 1,
         seeds = [
             b"event".as_ref(),
             event_base.key().as_ref(),
@@ -153,6 +228,72 @@ pub struct CreateEvent<'info> {
         bump
     )]
     pub event_vault: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        seeds = [
+            b"fee_vault".as_ref(),
+            event.key().as_ref(),
+        ],
+        bump,
+    )]
+    pub fee_vault: SystemAccount<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(amount: u64)]
+pub struct DepositInFeeVault<'info> {
+    pub system_program: Program<'info, System>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    /// CHECK: This is used only for generating the PDA.
+    pub event_base: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        seeds = [
+            b"event".as_ref(),
+            event_base.key().as_ref(),
+        ],
+        bump = event.bump
+    )]
+    pub event: Account<'info, Event>,
+    #[account(
+        mut,
+        seeds = [
+            b"fee_vault".as_ref(),
+            event.key().as_ref(),
+        ],
+        bump = event.fee_vault_bump
+    )]
+    pub fee_vault: SystemAccount<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(amount: u64)]
+pub struct WithdrawFromFeeVault<'info> {
+    pub system_program: Program<'info, System>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    /// CHECK: This is used only for generating the PDA.
+    pub event_base: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        seeds = [
+            b"event".as_ref(),
+            event_base.key().as_ref(),
+        ],
+        bump = event.bump,
+        constraint = event.authority == authority.key() @ ErrorCode::OnlyEventAuthorityCanMakeWithdraws
+    )]
+    pub event: Account<'info, Event>,
+    #[account(
+        mut,
+        seeds = [
+            b"fee_vault".as_ref(),
+            event.key().as_ref(),
+        ],
+        bump = event.fee_vault_bump
+    )]
+    pub fee_vault: SystemAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -290,8 +431,12 @@ pub struct BuyTickets<'info> {
 pub struct Event {
     pub event_title: String, // max 32
     pub accepted_mint: Pubkey,
+    pub authority: Pubkey,
+    pub total_fee_vault_deposited: u64,
+    pub total_fee_vault_value_locked: u64,
     pub bump: u8,
     pub event_vault_bump: u8,
+    pub fee_vault_bump: u8,
 }
 
 #[account]
@@ -308,4 +453,6 @@ pub struct EventTicket {
 pub enum ErrorCode {
     #[msg("There are not enough tickets available.")]
     NotEnoughTicketsAvailable,
+    #[msg("Only event authority can make withdraws.")]
+    OnlyEventAuthorityCanMakeWithdraws,
 }
