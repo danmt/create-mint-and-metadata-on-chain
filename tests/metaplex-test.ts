@@ -37,6 +37,7 @@ describe("disco", () => {
     .use(walletAdapterIdentity(provider.wallet))
     .use(bundlrStorage());
   const aliceBalance = 5000;
+  const eventFeeVaultBalance = anchor.web3.LAMPORTS_PER_SOL;
   let aliceKeypair: anchor.web3.Keypair;
   let aliceAssociatedWalletPublicKey: anchor.web3.PublicKey;
   let eventPublicKey: anchor.web3.PublicKey;
@@ -124,7 +125,7 @@ describe("disco", () => {
   it("should create Tomorrowland 2022 event", async () => {
     // arrange
     const eventTitle = "Tomorrowland 2022";
-    const feeVaultAmount = 1000 + feeVaultRentExemption;
+    const feeVaultAmount = eventFeeVaultBalance + feeVaultRentExemption;
     // act
     await program.methods
       .createEvent(eventTitle, new BN(feeVaultAmount))
@@ -218,7 +219,7 @@ describe("disco", () => {
     );
   });
 
-  it("should fail on unauthorized withdraws", async () => {
+  it("should fail on unauthorized withdraw from fee vault", async () => {
     // arrange
     const eventBaseKeypair = anchor.web3.Keypair.generate();
     let error: AnchorError;
@@ -252,7 +253,147 @@ describe("disco", () => {
     }
     // assert
     assert.isDefined(error);
-    assert.equal(error.error.errorCode.code, 'OnlyEventAuthorityCanMakeWithdraws');
+    assert.equal(
+      error.error.errorCode.code,
+      "OnlyEventAuthorityCanWithdrawFromFeeVault"
+    );
+  });
+
+  it("should create and delete collaborators", async () => {
+    // arrange
+    const collaborator1Keypair = anchor.web3.Keypair.generate();
+    const collaborator2Keypair = anchor.web3.Keypair.generate();
+    const [collaborator1PublicKey] =
+      await anchor.web3.PublicKey.findProgramAddress(
+        [
+          Buffer.from("collaborator", "utf-8"),
+          eventPublicKey.toBuffer(),
+          collaborator1Keypair.publicKey.toBuffer(),
+        ],
+        program.programId
+      );
+    const [collaborator2PublicKey] =
+      await anchor.web3.PublicKey.findProgramAddress(
+        [
+          Buffer.from("collaborator", "utf-8"),
+          eventPublicKey.toBuffer(),
+          collaborator2Keypair.publicKey.toBuffer(),
+        ],
+        program.programId
+      );
+    // act
+    await Promise.all([
+      program.methods
+        .createCollaborator()
+        .accounts({
+          authority: provider.wallet.publicKey,
+          eventBase: eventBaseKeypair.publicKey,
+          collaboratorBase: collaborator1Keypair.publicKey,
+        })
+        .rpc(),
+      program.methods
+        .createCollaborator()
+        .accounts({
+          authority: provider.wallet.publicKey,
+          eventBase: eventBaseKeypair.publicKey,
+          collaboratorBase: collaborator2Keypair.publicKey,
+        })
+        .rpc(),
+    ]);
+    await program.methods
+      .deleteCollaborator()
+      .accounts({
+        authority: provider.wallet.publicKey,
+        eventBase: eventBaseKeypair.publicKey,
+        collaboratorBase: collaborator2Keypair.publicKey,
+      })
+      .rpc();
+    // assert
+    const collaborator1Account = await program.account.collaborator.fetch(
+      collaborator1PublicKey
+    );
+    const collaborator2Account =
+      await program.account.collaborator.fetchNullable(collaborator2PublicKey);
+    assert.isDefined(collaborator1Account);
+    assert.isNull(collaborator2Account);
+  });
+
+  it("should fail on unauthorized create collaborator", async () => {
+    // arrange
+    const eventBaseKeypair = anchor.web3.Keypair.generate();
+    const collaboratorKeypair = anchor.web3.Keypair.generate();
+    let error: AnchorError;
+    // act
+    await program.methods
+      .createEvent("fakeEvent", new BN(feeVaultRentExemption))
+      .accounts({
+        authority: provider.wallet.publicKey,
+        eventBase: eventBaseKeypair.publicKey,
+        acceptedMint: acceptedMintPublicKey,
+      })
+      .rpc();
+    try {
+      await program.methods
+        .createCollaborator()
+        .accounts({
+          authority: aliceKeypair.publicKey,
+          eventBase: eventBaseKeypair.publicKey,
+          collaboratorBase: collaboratorKeypair.publicKey,
+        })
+        .signers([aliceKeypair])
+        .rpc();
+    } catch (err) {
+      error = err;
+    }
+    // assert
+    assert.isDefined(error);
+    assert.equal(
+      error.error.errorCode.code,
+      "OnlyEventAuthorityCanCreateCollaborators"
+    );
+  });
+
+  it("should fail on unauthorized delete collaborator", async () => {
+    // arrange
+    const eventBaseKeypair = anchor.web3.Keypair.generate();
+    const collaboratorKeypair = anchor.web3.Keypair.generate();
+    let error: AnchorError;
+    // act
+    await program.methods
+      .createEvent("fakeEvent", new BN(feeVaultRentExemption + anchor.web3.LAMPORTS_PER_SOL))
+      .accounts({
+        authority: provider.wallet.publicKey,
+        eventBase: eventBaseKeypair.publicKey,
+        acceptedMint: acceptedMintPublicKey,
+      })
+      .rpc();
+    await program.methods
+      .createCollaborator()
+      .accounts({
+        authority: provider.wallet.publicKey,
+        eventBase: eventBaseKeypair.publicKey,
+        collaboratorBase: collaboratorKeypair.publicKey,
+      })
+      .rpc();
+    try {
+      await program.methods
+        .deleteCollaborator()
+        .accounts({
+          authority: aliceKeypair.publicKey,
+          eventBase: eventBaseKeypair.publicKey,
+          collaboratorBase: collaboratorKeypair.publicKey,
+        })
+        .signers([aliceKeypair])
+        .rpc();
+    } catch (err) {
+      error = err;
+    }
+    // assert
+    assert.isDefined(error);
+    assert.equal(
+      error.error.errorCode.code,
+      "OnlyEventAuthorityCanDeleteCollaborators"
+    );
   });
 
   it("should create general tickets", async () => {

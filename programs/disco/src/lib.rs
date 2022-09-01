@@ -52,6 +52,7 @@ pub mod disco {
             &[
                 ctx.accounts.authority.to_account_info().clone(),
                 ctx.accounts.fee_vault.to_account_info().clone(),
+                ctx.accounts.system_program.to_account_info().clone(),
             ],
         )?;
 
@@ -67,17 +68,6 @@ pub mod disco {
             &[ctx.accounts.event.fee_vault_bump],
         ];
 
-        /* **ctx
-            .accounts
-            .fee_vault
-            .to_account_info()
-            .try_borrow_mut_lamports()? -= amount;
-        **ctx
-            .accounts
-            .authority
-            .to_account_info()
-            .try_borrow_mut_lamports()? += amount; */
-
         solana_program::program::invoke_signed(
             &solana_program::system_instruction::transfer(
                 &ctx.accounts.fee_vault.key(),
@@ -87,10 +77,63 @@ pub mod disco {
             &[
                 ctx.accounts.fee_vault.to_account_info().clone(),
                 ctx.accounts.authority.to_account_info().clone(),
+                ctx.accounts.system_program.to_account_info().clone(),
             ],
             &[&seeds[..]],
         )?;
 
+        Ok(())
+    }
+
+    pub fn create_collaborator(ctx: Context<CreateCollaborator>) -> Result<()> {
+        let fee_vault_seeds = &[
+            b"fee_vault".as_ref(),
+            ctx.accounts.event.to_account_info().key.as_ref(),
+            &[ctx.accounts.event.fee_vault_bump],
+        ];
+        let collaborator_seeds = &[
+            b"collaborator".as_ref(),
+            ctx.accounts.event.to_account_info().key.as_ref(),
+            ctx.accounts
+                .collaborator_base
+                .to_account_info()
+                .key
+                .as_ref(),
+            &[*ctx.bumps.get("collaborator").unwrap()],
+        ];
+
+        anchor_lang::system_program::create_account(
+            anchor_lang::context::CpiContext::new_with_signer(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::CreateAccount {
+                    from: ctx.accounts.fee_vault.to_account_info().clone(),
+                    to: ctx.accounts.collaborator.to_account_info().clone(),
+                },
+                &[&fee_vault_seeds[..], &collaborator_seeds[..]],
+            ),
+            Rent::get()?.minimum_balance(9),
+            9,
+            &ctx.program_id,
+        )?;
+
+        // Deserialize the newly created account.
+        let mut collaborator_account = {
+            let account_data = ctx.accounts.collaborator.try_borrow_data()?;
+            let mut account_data_slice: &[u8] = &account_data;
+            Collaborator::try_deserialize_unchecked(&mut account_data_slice)?
+        };
+
+        collaborator_account.bump = *ctx.bumps.get("collaborator").unwrap();
+
+        let mut data = ctx.accounts.collaborator.try_borrow_mut_data()?;
+        let dst: &mut [u8] = &mut data;
+        let mut cursor = std::io::Cursor::new(dst);
+        collaborator_account.try_serialize(&mut cursor)?;
+
+        Ok(())
+    }
+
+    pub fn delete_collaborator(_ctx: Context<DeleteCollaborator>) -> Result<()> {
         Ok(())
     }
 
@@ -282,7 +325,7 @@ pub struct WithdrawFromFeeVault<'info> {
             event_base.key().as_ref(),
         ],
         bump = event.bump,
-        constraint = event.authority == authority.key() @ ErrorCode::OnlyEventAuthorityCanMakeWithdraws
+        constraint = event.authority == authority.key() @ ErrorCode::OnlyEventAuthorityCanWithdrawFromFeeVault
     )]
     pub event: Account<'info, Event>,
     #[account(
@@ -294,6 +337,75 @@ pub struct WithdrawFromFeeVault<'info> {
         bump = event.fee_vault_bump
     )]
     pub fee_vault: SystemAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct CreateCollaborator<'info> {
+    pub system_program: Program<'info, System>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    /// CHECK: This is used only for generating the PDA.
+    pub event_base: UncheckedAccount<'info>,
+    #[account(
+        seeds = [
+            b"event".as_ref(),
+            event_base.key().as_ref(),
+        ],
+        bump = event.bump,
+        constraint = event.authority == authority.key() @ ErrorCode::OnlyEventAuthorityCanCreateCollaborators
+    )]
+    pub event: Account<'info, Event>,
+    #[account(
+        mut,
+        seeds = [
+            b"fee_vault".as_ref(),
+            event.key().as_ref(),
+        ],
+        bump = event.fee_vault_bump
+    )]
+    pub fee_vault: SystemAccount<'info>,
+    pub collaborator_base: SystemAccount<'info>,
+    /// CHECK: This account is created in this instruction
+    #[account(
+        mut,
+        seeds = [
+            b"collaborator".as_ref(),
+            event.key().as_ref(),
+            collaborator_base.key().as_ref(),
+        ],
+        bump
+    )]
+    pub collaborator: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct DeleteCollaborator<'info> {
+    pub system_program: Program<'info, System>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    /// CHECK: This is used only for generating the PDA.
+    pub event_base: UncheckedAccount<'info>,
+    #[account(
+        seeds = [
+            b"event".as_ref(),
+            event_base.key().as_ref(),
+        ],
+        bump = event.bump,
+        constraint = event.authority == authority.key() @ ErrorCode::OnlyEventAuthorityCanDeleteCollaborators
+    )]
+    pub event: Account<'info, Event>,
+    pub collaborator_base: SystemAccount<'info>,
+    #[account(
+        mut,
+        close = authority,
+        seeds = [
+            b"collaborator".as_ref(),
+            event.key().as_ref(),
+            collaborator_base.key().as_ref(),
+        ],
+        bump
+    )]
+    pub collaborator: Account<'info, Collaborator>,
 }
 
 #[derive(Accounts)]
@@ -440,6 +552,11 @@ pub struct Event {
 }
 
 #[account]
+pub struct Collaborator {
+    pub bump: u8,
+}
+
+#[account]
 pub struct EventTicket {
     pub price: u32,
     pub quantity: u32,
@@ -453,6 +570,10 @@ pub struct EventTicket {
 pub enum ErrorCode {
     #[msg("There are not enough tickets available.")]
     NotEnoughTicketsAvailable,
-    #[msg("Only event authority can make withdraws.")]
-    OnlyEventAuthorityCanMakeWithdraws,
+    #[msg("Only event authority can withdraw from fee vault.")]
+    OnlyEventAuthorityCanWithdrawFromFeeVault,
+    #[msg("Only event authority can create collaborators.")]
+    OnlyEventAuthorityCanCreateCollaborators,
+    #[msg("Only event authority can delete collaborators.")]
+    OnlyEventAuthorityCanDeleteCollaborators,
 }
