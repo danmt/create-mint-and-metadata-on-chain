@@ -4,6 +4,8 @@ use anchor_spl::{
     token::{mint_to, transfer, Mint, MintTo, Token, TokenAccount, Transfer},
 };
 
+mod utils;
+
 declare_id!("EJQnbXhsLS92wsAXg1vPaZt88hfzmuhcqBVLQBn9h23x");
 
 #[program]
@@ -111,24 +113,19 @@ pub mod disco {
                 },
                 &[&fee_vault_seeds[..], &collaborator_seeds[..]],
             ),
-            Rent::get()?.minimum_balance(9),
-            9,
+            Rent::get()?.minimum_balance(Collaborator::SIZE),
+            Collaborator::SIZE.try_into().unwrap(),
             &ctx.program_id,
         )?;
 
-        // Deserialize the newly created account.
-        let mut collaborator_account = {
-            let account_data = ctx.accounts.collaborator.try_borrow_data()?;
-            let mut account_data_slice: &[u8] = &account_data;
-            Collaborator::try_deserialize_unchecked(&mut account_data_slice)?
-        };
+        if utils::is_discriminator_already_set(&ctx.accounts.collaborator)? {
+            return Err(anchor_lang::prelude::ErrorCode::AccountDiscriminatorAlreadySet.into());
+        }
 
-        collaborator_account.bump = *ctx.bumps.get("collaborator").unwrap();
-
-        let mut data = ctx.accounts.collaborator.try_borrow_mut_data()?;
-        let dst: &mut [u8] = &mut data;
-        let mut cursor = std::io::Cursor::new(dst);
-        collaborator_account.try_serialize(&mut cursor)?;
+        let mut collaborator: Collaborator =
+            utils::try_deserialize_unchecked(&ctx.accounts.collaborator)?;
+        collaborator.bump = *ctx.bumps.get("collaborator").unwrap();
+        collaborator.try_write(&ctx.accounts.collaborator)?;
 
         Ok(())
     }
@@ -250,7 +247,7 @@ pub struct CreateEvent<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + 36 + 32 + 32 + 8 + 8 + 1 + 1 + 1,
+        space = Event::SIZE,
         seeds = [
             b"event".as_ref(),
             event_base.key().as_ref(),
@@ -364,7 +361,8 @@ pub struct CreateCollaborator<'info> {
         bump = event.fee_vault_bump
     )]
     pub fee_vault: SystemAccount<'info>,
-    pub collaborator_base: SystemAccount<'info>,
+    /// CHECK: This account is used only as a base for derivation
+    pub collaborator_base: UncheckedAccount<'info>,
     /// CHECK: This account is created in this instruction
     #[account(
         mut,
@@ -394,7 +392,8 @@ pub struct DeleteCollaborator<'info> {
         constraint = event.authority == authority.key() @ ErrorCode::OnlyEventAuthorityCanDeleteCollaborators
     )]
     pub event: Account<'info, Event>,
-    pub collaborator_base: SystemAccount<'info>,
+    /// CHECK: This account is used only as a base for derivation
+    pub collaborator_base: UncheckedAccount<'info>,
     #[account(
         mut,
         close = authority,
@@ -440,7 +439,7 @@ pub struct CreateEventTicket<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + 4 + 4 + 4 + 1 + 1 + 1,
+        space = EventTicket::SIZE,
         seeds = [
             b"event_ticket".as_ref(),
             event.key().as_ref(),
@@ -551,9 +550,24 @@ pub struct Event {
     pub fee_vault_bump: u8,
 }
 
+impl Event {
+    pub const SIZE: usize = 8 + 36 + 32 + 32 + 8 + 8 + 1 + 1 + 1;
+}
+
 #[account]
 pub struct Collaborator {
     pub bump: u8,
+}
+
+impl Collaborator {
+    pub const SIZE: usize = 8 + 1;
+
+    fn try_write<'info>(&mut self, account: &UncheckedAccount<'info>) -> Result<()> {
+        let mut data = account.try_borrow_mut_data()?;
+        let dst: &mut [u8] = &mut data;
+        let mut cursor = std::io::Cursor::new(dst);
+        self.try_serialize(&mut cursor)
+    }
 }
 
 #[account]
@@ -564,6 +578,10 @@ pub struct EventTicket {
     pub bump: u8,
     pub ticket_mint_bump: u8,
     pub ticket_metadata_bump: u8,
+}
+
+impl EventTicket {
+    pub const SIZE: usize = 8 + 4 + 4 + 4 + 1 + 1 + 1;
 }
 
 #[error_code]
