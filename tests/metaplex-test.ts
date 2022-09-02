@@ -38,12 +38,10 @@ describe("disco", () => {
     .use(walletAdapterIdentity(provider.wallet))
     .use(bundlrStorage());
   const aliceBalance = 5000;
-  const eventFeeVaultBalance = anchor.web3.LAMPORTS_PER_SOL;
   let aliceKeypair: anchor.web3.Keypair;
   let aliceAssociatedWalletPublicKey: anchor.web3.PublicKey;
   let eventPublicKey: anchor.web3.PublicKey;
   let eventVaultPublicKey: anchor.web3.PublicKey;
-  let feeVaultPublicKey: anchor.web3.PublicKey;
   let aliceGeneralTicketAssociatedTokenPublicKey: anchor.web3.PublicKey;
   let aliceVipTicketAssociatedTokenPublicKey: anchor.web3.PublicKey;
   let acceptedMintPublicKey: anchor.web3.PublicKey;
@@ -51,7 +49,6 @@ describe("disco", () => {
   let eventVipTicketPublicKey: anchor.web3.PublicKey;
   let eventGeneralTicketMintPublicKey: anchor.web3.PublicKey;
   let eventVipTicketMintPublicKey: anchor.web3.PublicKey;
-  let feeVaultRentExemption: number;
   let collaborator1PublicKey: anchor.web3.PublicKey;
 
   before(async () => {
@@ -98,10 +95,6 @@ describe("disco", () => {
       [Buffer.from("event_vault", "utf-8"), eventPublicKey.toBuffer()],
       program.programId
     );
-    [feeVaultPublicKey] = await anchor.web3.PublicKey.findProgramAddress(
-      [Buffer.from("fee_vault", "utf-8"), eventPublicKey.toBuffer()],
-      program.programId
-    );
     [collaborator1PublicKey] = await anchor.web3.PublicKey.findProgramAddress(
       [
         Buffer.from("collaborator", "utf-8"),
@@ -128,17 +121,14 @@ describe("disco", () => {
       eventVipTicketMintPublicKey,
       aliceKeypair.publicKey
     );
-    feeVaultRentExemption =
-      await provider.connection.getMinimumBalanceForRentExemption(0);
   });
 
   it("should create Tomorrowland 2022 event", async () => {
     // arrange
     const eventTitle = "Tomorrowland 2022";
-    const feeVaultAmount = eventFeeVaultBalance + feeVaultRentExemption;
     // act
     await program.methods
-      .createEvent(eventTitle, new BN(feeVaultAmount))
+      .createEvent(eventTitle)
       .accounts({
         authority: provider.wallet.publicKey,
         eventBase: eventBaseKeypair.publicKey,
@@ -151,122 +141,12 @@ describe("disco", () => {
       provider.connection,
       eventVaultPublicKey
     );
-    const feeVaultAccountInfo = await provider.connection.getAccountInfo(
-      feeVaultPublicKey
-    );
     assert.isDefined(eventAccount);
     assert.equal(eventAccount.eventTitle, eventTitle);
     assert.isTrue(eventAccount.authority.equals(provider.wallet.publicKey));
-    assert.isTrue(
-      eventAccount.totalFeeVaultValueLocked.eq(new BN(feeVaultAmount))
-    );
-    assert.isTrue(
-      eventAccount.totalFeeVaultDeposited.eq(new BN(feeVaultAmount))
-    );
     assert.isDefined(eventVaultAccount);
     assert.equal(eventVaultAccount.amount, BigInt(0));
     assert.isTrue(eventVaultAccount.mint.equals(acceptedMintPublicKey));
-    assert.isDefined(feeVaultAccountInfo);
-    assert.equal(feeVaultAccountInfo.lamports, feeVaultAmount);
-  });
-
-  it("should deposit and withdraw from fee vault", async () => {
-    // arrange
-    const depositAmount = 5000;
-    const withdrawAmount = 2000;
-    const eventBaseKeypair = anchor.web3.Keypair.generate();
-    const [eventPublicKey] = await anchor.web3.PublicKey.findProgramAddress(
-      [Buffer.from("event", "utf-8"), eventBaseKeypair.publicKey.toBuffer()],
-      program.programId
-    );
-    const [feeVaultPublicKey] = await anchor.web3.PublicKey.findProgramAddress(
-      [Buffer.from("fee_vault", "utf-8"), eventPublicKey.toBuffer()],
-      program.programId
-    );
-    // act
-    await program.methods
-      .createEvent("fakeEvent", new BN(feeVaultRentExemption))
-      .accounts({
-        authority: provider.wallet.publicKey,
-        eventBase: eventBaseKeypair.publicKey,
-        acceptedMint: acceptedMintPublicKey,
-      })
-      .rpc();
-    await program.methods
-      .depositInFeeVault(new BN(depositAmount))
-      .accounts({
-        authority: provider.wallet.publicKey,
-        eventBase: eventBaseKeypair.publicKey,
-      })
-      .rpc();
-    await program.methods
-      .withdrawFromFeeVault(new BN(withdrawAmount))
-      .accounts({
-        authority: provider.wallet.publicKey,
-        eventBase: eventBaseKeypair.publicKey,
-      })
-      .rpc();
-    // assert
-    const eventAccount = await program.account.event.fetch(eventPublicKey);
-    const feeVaultAccountInfo = await provider.connection.getAccountInfo(
-      feeVaultPublicKey
-    );
-    assert.isDefined(eventAccount);
-    assert.isTrue(
-      eventAccount.totalFeeVaultValueLocked.eq(
-        new BN(depositAmount + feeVaultRentExemption - withdrawAmount)
-      )
-    );
-    assert.isTrue(
-      eventAccount.totalFeeVaultDeposited.eq(
-        new BN(depositAmount + feeVaultRentExemption)
-      )
-    );
-    assert.isDefined(feeVaultAccountInfo);
-    assert.equal(
-      feeVaultAccountInfo.lamports,
-      depositAmount + feeVaultRentExemption - withdrawAmount
-    );
-  });
-
-  it("should fail on unauthorized withdraw from fee vault", async () => {
-    // arrange
-    const eventBaseKeypair = anchor.web3.Keypair.generate();
-    let error: AnchorError;
-    // act
-    await program.methods
-      .createEvent("fakeEvent", new BN(feeVaultRentExemption))
-      .accounts({
-        authority: provider.wallet.publicKey,
-        eventBase: eventBaseKeypair.publicKey,
-        acceptedMint: acceptedMintPublicKey,
-      })
-      .rpc();
-    await program.methods
-      .depositInFeeVault(new BN(5000))
-      .accounts({
-        authority: provider.wallet.publicKey,
-        eventBase: eventBaseKeypair.publicKey,
-      })
-      .rpc();
-    try {
-      await program.methods
-        .withdrawFromFeeVault(new BN(2000))
-        .accounts({
-          authority: aliceKeypair.publicKey,
-          eventBase: eventBaseKeypair.publicKey,
-        })
-        .signers([aliceKeypair])
-        .rpc();
-    } catch (err) {
-      error = err;
-    }
-    // assert
-    assert.isDefined(error);
-    assert.equal(
-      error.error.errorCode.code,
-      "OnlyEventAuthorityCanWithdrawFromFeeVault"
-    );
   });
 
   it("should create and delete collaborators", async () => {
@@ -325,7 +205,7 @@ describe("disco", () => {
     let error: AnchorError;
     // act
     await program.methods
-      .createEvent("fakeEvent", new BN(feeVaultRentExemption))
+      .createEvent("fakeEvent")
       .accounts({
         authority: provider.wallet.publicKey,
         eventBase: eventBaseKeypair.publicKey,
@@ -360,10 +240,7 @@ describe("disco", () => {
     let error: AnchorError;
     // act
     await program.methods
-      .createEvent(
-        "fakeEvent",
-        new BN(feeVaultRentExemption + anchor.web3.LAMPORTS_PER_SOL)
-      )
+      .createEvent("fakeEvent")
       .accounts({
         authority: provider.wallet.publicKey,
         eventBase: eventBaseKeypair.publicKey,
