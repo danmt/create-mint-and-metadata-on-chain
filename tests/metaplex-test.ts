@@ -30,6 +30,7 @@ describe("disco", () => {
   const eventBaseKeypair = anchor.web3.Keypair.generate();
   const eventGeneralTicketBaseKeypair = anchor.web3.Keypair.generate();
   const eventVipTicketBaseKeypair = anchor.web3.Keypair.generate();
+  const collaborator1Keypair = anchor.web3.Keypair.generate();
   const metadataProgramPublicKey = new anchor.web3.PublicKey(
     "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
   );
@@ -51,6 +52,7 @@ describe("disco", () => {
   let eventGeneralTicketMintPublicKey: anchor.web3.PublicKey;
   let eventVipTicketMintPublicKey: anchor.web3.PublicKey;
   let feeVaultRentExemption: number;
+  let collaborator1PublicKey: anchor.web3.PublicKey;
 
   before(async () => {
     [eventPublicKey] = await anchor.web3.PublicKey.findProgramAddress(
@@ -98,6 +100,14 @@ describe("disco", () => {
     );
     [feeVaultPublicKey] = await anchor.web3.PublicKey.findProgramAddress(
       [Buffer.from("fee_vault", "utf-8"), eventPublicKey.toBuffer()],
+      program.programId
+    );
+    [collaborator1PublicKey] = await anchor.web3.PublicKey.findProgramAddress(
+      [
+        Buffer.from("collaborator", "utf-8"),
+        eventPublicKey.toBuffer(),
+        collaborator1Keypair.publicKey.toBuffer(),
+      ],
       program.programId
     );
 
@@ -261,17 +271,7 @@ describe("disco", () => {
 
   it("should create and delete collaborators", async () => {
     // arrange
-    const collaborator1Keypair = anchor.web3.Keypair.generate();
     const collaborator2Keypair = anchor.web3.Keypair.generate();
-    const [collaborator1PublicKey] =
-      await anchor.web3.PublicKey.findProgramAddress(
-        [
-          Buffer.from("collaborator", "utf-8"),
-          eventPublicKey.toBuffer(),
-          collaborator1Keypair.publicKey.toBuffer(),
-        ],
-        program.programId
-      );
     const [collaborator2PublicKey] =
       await anchor.web3.PublicKey.findProgramAddress(
         [
@@ -360,7 +360,10 @@ describe("disco", () => {
     let error: AnchorError;
     // act
     await program.methods
-      .createEvent("fakeEvent", new BN(feeVaultRentExemption + anchor.web3.LAMPORTS_PER_SOL))
+      .createEvent(
+        "fakeEvent",
+        new BN(feeVaultRentExemption + anchor.web3.LAMPORTS_PER_SOL)
+      )
       .accounts({
         authority: provider.wallet.publicKey,
         eventBase: eventBaseKeypair.publicKey,
@@ -486,6 +489,7 @@ describe("disco", () => {
     assert.equal(eventVipTicketAccount.price, ticketPrice);
     assert.equal(eventVipTicketAccount.quantity, ticketQuantity);
     assert.equal(eventVipTicketAccount.sold, 0);
+    assert.equal(eventVipTicketAccount.used, 0);
     assert.isDefined(ticketMintAccount);
     assert.equal(ticketMintAccount.decimals, 0);
     assert.equal(ticketMintAccount.supply, BigInt(0));
@@ -646,6 +650,48 @@ describe("disco", () => {
     assert.equal(
       afterEventVipTicketAccount.sold,
       beforeEventVipTicketAccount.sold + vipTicketQuantity
+    );
+  });
+
+  it("should check-in 2 general tickets", async () => {
+    // arrange
+    const generalTicketQuantity = 2;
+    const beforeEventGeneralTicketAccount =
+      await program.account.eventTicket.fetch(eventGeneralTicketPublicKey);
+    const beforeAliceGeneralTicketVaultAccount = await getAccount(
+      provider.connection,
+      aliceGeneralTicketAssociatedTokenPublicKey
+    );
+    // act
+    await program.methods
+      .checkIn(generalTicketQuantity)
+      .accounts({
+        attendee: aliceKeypair.publicKey,
+        collaboratorBase: collaborator1Keypair.publicKey,
+        eventBase: eventBaseKeypair.publicKey,
+        eventTicketBase: eventGeneralTicketBaseKeypair.publicKey,
+        ticketVault: aliceGeneralTicketAssociatedTokenPublicKey,
+      })
+      .signers([aliceKeypair, collaborator1Keypair])
+      .rpc();
+    // assert
+    const afterEventGeneralTicketAccount =
+      await program.account.eventTicket.fetch(eventGeneralTicketPublicKey);
+    const afterAliceGeneralTicketVaultAccount = await getAccount(
+      provider.connection,
+      aliceGeneralTicketAssociatedTokenPublicKey
+    );
+    assert.isDefined(beforeEventGeneralTicketAccount);
+    assert.isDefined(afterEventGeneralTicketAccount);
+    assert.equal(
+      beforeEventGeneralTicketAccount.used + generalTicketQuantity,
+      afterEventGeneralTicketAccount.used
+    );
+    assert.isDefined(beforeAliceGeneralTicketVaultAccount);
+    assert.isDefined(afterAliceGeneralTicketVaultAccount);
+    assert.equal(
+      beforeAliceGeneralTicketVaultAccount.amount,
+      afterAliceGeneralTicketVaultAccount.amount + BigInt(generalTicketQuantity)
     );
   });
 

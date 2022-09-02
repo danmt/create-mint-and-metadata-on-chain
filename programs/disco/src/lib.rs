@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
-    token::{mint_to, transfer, Mint, MintTo, Token, TokenAccount, Transfer},
+    token::{burn, mint_to, transfer, Burn, Mint, MintTo, Token, TokenAccount, Transfer},
 };
 
 mod utils;
@@ -145,6 +145,7 @@ pub mod disco {
         (*ctx.accounts.event_ticket).price = ticket_price;
         (*ctx.accounts.event_ticket).quantity = ticket_quantity;
         (*ctx.accounts.event_ticket).sold = 0;
+        (*ctx.accounts.event_ticket).used = 0;
         (*ctx.accounts.event_ticket).bump = *ctx.bumps.get("event_ticket").unwrap();
         (*ctx.accounts.event_ticket).ticket_mint_bump = *ctx.bumps.get("ticket_mint").unwrap();
         (*ctx.accounts.event_ticket).ticket_metadata_bump =
@@ -226,6 +227,24 @@ pub mod disco {
                     authority: ctx.accounts.event.to_account_info(),
                 },
                 &[&seeds[..]],
+            ),
+            ticket_quantity.into(),
+        )?;
+
+        Ok(())
+    }
+
+    pub fn check_in(ctx: Context<CheckIn>, ticket_quantity: u32) -> Result<()> {
+        (*ctx.accounts.event_ticket).used += ticket_quantity;
+
+        burn(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Burn {
+                    authority: ctx.accounts.attendee.to_account_info(),
+                    from: ctx.accounts.ticket_vault.to_account_info(),
+                    mint: ctx.accounts.ticket_mint.to_account_info(),
+                },
             ),
             ticket_quantity.into(),
         )?;
@@ -538,6 +557,65 @@ pub struct BuyTickets<'info> {
     pub ticket_vault: Box<Account<'info, TokenAccount>>,
 }
 
+#[derive(Accounts)]
+#[instruction(ticket_quantity: u32)]
+pub struct CheckIn<'info> {
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub rent: Sysvar<'info, Rent>,
+    #[account(mut)]
+    pub collaborator_base: Signer<'info>,
+    pub attendee: Signer<'info>,
+    /// CHECK: This is used only for generating the PDA.
+    pub event_base: UncheckedAccount<'info>,
+    #[account(
+        seeds = [
+            b"event".as_ref(),
+            event_base.key().as_ref(),
+        ],
+        bump = event.bump
+    )]
+    pub event: Account<'info, Event>,
+    #[account(
+        seeds = [
+            b"collaborator".as_ref(),
+            event.key().as_ref(),
+            collaborator_base.key().as_ref(),
+        ],
+        bump
+    )]
+    pub collaborator: Account<'info, Collaborator>,
+    /// CHECK: This is used only for generating the PDA.
+    pub event_ticket_base: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        seeds = [
+            b"event_ticket".as_ref(),
+            event.key().as_ref(),
+            event_ticket_base.key().as_ref(),
+        ],
+        bump = event_ticket.bump,
+        constraint = event_ticket.sold - event_ticket.used >= ticket_quantity @ ErrorCode::NotEnoughTicketsAvailable
+    )]
+    pub event_ticket: Account<'info, EventTicket>,
+    #[account(
+        mut,
+        seeds = [
+            b"ticket_mint".as_ref(),
+            event.key().as_ref(),
+            event_ticket.key().as_ref(),
+        ],
+        bump = event_ticket.ticket_mint_bump
+    )]
+    pub ticket_mint: Account<'info, Mint>,
+    #[account(
+        mut,
+        constraint = ticket_vault.mint == ticket_mint.key()
+    )]
+    pub ticket_vault: Box<Account<'info, TokenAccount>>,
+}
+
 #[account]
 pub struct Event {
     pub event_title: String, // max 32
@@ -575,13 +653,14 @@ pub struct EventTicket {
     pub price: u32,
     pub quantity: u32,
     pub sold: u32,
+    pub used: u32,
     pub bump: u8,
     pub ticket_mint_bump: u8,
     pub ticket_metadata_bump: u8,
 }
 
 impl EventTicket {
-    pub const SIZE: usize = 8 + 4 + 4 + 4 + 1 + 1 + 1;
+    pub const SIZE: usize = 8 + 4 + 4 + 4 + 4 + 1 + 1 + 1;
 }
 
 #[error_code]
