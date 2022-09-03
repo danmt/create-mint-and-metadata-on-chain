@@ -49,7 +49,9 @@ describe("disco", () => {
   let eventVipTicketPublicKey: anchor.web3.PublicKey;
   let eventGeneralTicketMintPublicKey: anchor.web3.PublicKey;
   let eventVipTicketMintPublicKey: anchor.web3.PublicKey;
+  let vipAttendanceMintPublicKey: anchor.web3.PublicKey;
   let collaborator1PublicKey: anchor.web3.PublicKey;
+  let aliceVipAttendanceAssociatedTokenPublicKey: anchor.web3.PublicKey;
 
   before(async () => {
     [eventPublicKey] = await anchor.web3.PublicKey.findProgramAddress(
@@ -91,6 +93,15 @@ describe("disco", () => {
         ],
         program.programId
       );
+    [vipAttendanceMintPublicKey] =
+      await anchor.web3.PublicKey.findProgramAddress(
+        [
+          Buffer.from("attendance_mint", "utf-8"),
+          eventPublicKey.toBuffer(),
+          eventVipTicketPublicKey.toBuffer(),
+        ],
+        program.programId
+      );
     [eventVaultPublicKey] = await anchor.web3.PublicKey.findProgramAddress(
       [Buffer.from("event_vault", "utf-8"), eventPublicKey.toBuffer()],
       program.programId
@@ -121,6 +132,11 @@ describe("disco", () => {
       eventVipTicketMintPublicKey,
       aliceKeypair.publicKey
     );
+    aliceVipAttendanceAssociatedTokenPublicKey =
+      await getAssociatedTokenAddress(
+        vipAttendanceMintPublicKey,
+        aliceKeypair.publicKey
+      );
   });
 
   it("should create Tomorrowland 2022 event", async () => {
@@ -314,6 +330,7 @@ describe("disco", () => {
     assert.equal(eventGeneralTicketAccount.price, ticketPrice);
     assert.equal(eventGeneralTicketAccount.quantity, ticketQuantity);
     assert.equal(eventGeneralTicketAccount.sold, 0);
+    assert.isFalse(eventGeneralTicketAccount.hasPoap);
     assert.isDefined(ticketMintAccount);
     assert.equal(ticketMintAccount.decimals, 0);
     assert.equal(ticketMintAccount.supply, BigInt(0));
@@ -328,13 +345,16 @@ describe("disco", () => {
     }
   });
 
-  it("should create vip tickets", async () => {
+  it("should create vip tickets with proof of attendance", async () => {
     // arrange
     const ticketName = "Tomorrowland 2022 - VIP";
     const ticketSymbol = "TMRLND2022";
     const ticketURI = "https://www.gooogle.com";
     const ticketPrice = 20;
     const ticketQuantity = 15;
+    const poapName = "Tomorrowland 2022 - VIP - POAP";
+    const poapSymbol = "TMRLNDPOAP";
+    const poapURI = "https://www.gooogle.com";
     // act
     await program.methods
       .createEventTicket(
@@ -350,6 +370,17 @@ describe("disco", () => {
         eventTicketBase: eventVipTicketBaseKeypair.publicKey,
         metadataProgram: metadataProgramPublicKey,
       })
+      .postInstructions([
+        await program.methods
+          .createProofOfAttendance(poapName, poapSymbol, poapURI)
+          .accounts({
+            authority: provider.wallet.publicKey,
+            eventBase: eventBaseKeypair.publicKey,
+            eventTicketBase: eventVipTicketBaseKeypair.publicKey,
+            metadataProgram: metadataProgramPublicKey,
+          })
+          .instruction(),
+      ])
       .rpc();
     // assert
     const eventVipTicketAccount = await program.account.eventTicket.fetch(
@@ -359,32 +390,54 @@ describe("disco", () => {
       provider.connection,
       eventVipTicketMintPublicKey
     );
-    const metaplexNft = await metaplex
+    const ticketMetadata = await metaplex
       .nfts()
       .findMintWithMetadataByAddress(eventVipTicketMintPublicKey)
       .run();
+    const attendanceMintAccount = await getMint(
+      provider.connection,
+      vipAttendanceMintPublicKey
+    );
+    const attendanceMetadata = await metaplex
+      .nfts()
+      .findMintWithMetadataByAddress(vipAttendanceMintPublicKey)
+      .run();
+    assert.isDefined(eventVipTicketAccount);
     assert.equal(eventVipTicketAccount.price, ticketPrice);
     assert.equal(eventVipTicketAccount.quantity, ticketQuantity);
     assert.equal(eventVipTicketAccount.sold, 0);
     assert.equal(eventVipTicketAccount.used, 0);
+    assert.isTrue(eventVipTicketAccount.hasPoap);
     assert.isDefined(ticketMintAccount);
     assert.equal(ticketMintAccount.decimals, 0);
     assert.equal(ticketMintAccount.supply, BigInt(0));
-    assert.isDefined(metaplexNft);
-    assert.equal(metaplexNft.decimals, 0);
-    assert.isTrue(metaplexNft.supply.basisPoints.eq(new anchor.BN(0)));
-    assert.isTrue(isMintWithMetadata(metaplexNft));
-    if (isMintWithMetadata(metaplexNft)) {
-      assert.equal(metaplexNft.metadata.name, ticketName);
-      assert.equal(metaplexNft.metadata.symbol, ticketSymbol);
-      assert.equal(metaplexNft.metadata.uri, ticketURI);
+    assert.isDefined(ticketMetadata);
+    assert.equal(ticketMetadata.decimals, 0);
+    assert.isTrue(ticketMetadata.supply.basisPoints.eq(new anchor.BN(0)));
+    assert.isTrue(isMintWithMetadata(ticketMetadata));
+    if (isMintWithMetadata(ticketMetadata)) {
+      assert.equal(ticketMetadata.metadata.name, ticketName);
+      assert.equal(ticketMetadata.metadata.symbol, ticketSymbol);
+      assert.equal(ticketMetadata.metadata.uri, ticketURI);
+    }
+    assert.isDefined(attendanceMintAccount);
+    assert.equal(attendanceMintAccount.decimals, 0);
+    assert.equal(attendanceMintAccount.supply, BigInt(0));
+    assert.isDefined(attendanceMetadata);
+    assert.equal(attendanceMetadata.decimals, 0);
+    assert.isTrue(attendanceMetadata.supply.basisPoints.eq(new anchor.BN(0)));
+    assert.isTrue(isMintWithMetadata(attendanceMetadata));
+    if (isMintWithMetadata(attendanceMetadata)) {
+      assert.equal(attendanceMetadata.metadata.name, poapName);
+      assert.equal(attendanceMetadata.metadata.symbol, poapSymbol);
+      assert.equal(attendanceMetadata.metadata.uri, poapURI);
     }
   });
 
-  it("should buy 3 general tickets and 1 vip", async () => {
+  it("should buy 8 general tickets and 5 vip", async () => {
     // arrange
-    const generalTicketQuantity = 3;
-    const vipTicketQuantity = 1;
+    const generalTicketQuantity = 8;
+    const vipTicketQuantity = 5;
     const beforeAliceAccount = await getAccount(
       provider.connection,
       aliceAssociatedWalletPublicKey
@@ -420,6 +473,12 @@ describe("disco", () => {
           aliceVipTicketAssociatedTokenPublicKey,
           aliceKeypair.publicKey,
           eventVipTicketMintPublicKey
+        ),
+        createAssociatedTokenAccountInstruction(
+          provider.wallet.publicKey,
+          aliceVipAttendanceAssociatedTokenPublicKey,
+          aliceKeypair.publicKey,
+          vipAttendanceMintPublicKey
         )
       )
     );
@@ -530,7 +589,7 @@ describe("disco", () => {
     );
   });
 
-  it("should check-in 2 general tickets", async () => {
+  it("should check-in 2 general tickets and 1 vip ticket", async () => {
     // arrange
     const generalTicketQuantity = 2;
     const beforeEventGeneralTicketAccount =
@@ -539,18 +598,44 @@ describe("disco", () => {
       provider.connection,
       aliceGeneralTicketAssociatedTokenPublicKey
     );
+    const vipTicketQuantity = 1;
+    const beforeEventVipTicketAccount = await program.account.eventTicket.fetch(
+      eventVipTicketPublicKey
+    );
+    const beforeAliceVipTicketVaultAccount = await getAccount(
+      provider.connection,
+      aliceVipTicketAssociatedTokenPublicKey
+    );
+    const beforeAliceVipAttendanceVaultAccount = await getAccount(
+      provider.connection,
+      aliceVipAttendanceAssociatedTokenPublicKey
+    );
     // act
-    await program.methods
-      .checkIn(generalTicketQuantity)
-      .accounts({
-        attendee: aliceKeypair.publicKey,
-        collaboratorBase: collaborator1Keypair.publicKey,
-        eventBase: eventBaseKeypair.publicKey,
-        eventTicketBase: eventGeneralTicketBaseKeypair.publicKey,
-        ticketVault: aliceGeneralTicketAssociatedTokenPublicKey,
-      })
-      .signers([aliceKeypair, collaborator1Keypair])
-      .rpc();
+    await Promise.all([
+      program.methods
+        .checkIn(generalTicketQuantity)
+        .accounts({
+          attendee: aliceKeypair.publicKey,
+          collaboratorBase: collaborator1Keypair.publicKey,
+          eventBase: eventBaseKeypair.publicKey,
+          eventTicketBase: eventGeneralTicketBaseKeypair.publicKey,
+          ticketVault: aliceGeneralTicketAssociatedTokenPublicKey,
+        })
+        .signers([aliceKeypair, collaborator1Keypair])
+        .rpc(),
+      program.methods
+        .checkInWithAttendance(vipTicketQuantity)
+        .accounts({
+          attendee: aliceKeypair.publicKey,
+          collaboratorBase: collaborator1Keypair.publicKey,
+          eventBase: eventBaseKeypair.publicKey,
+          eventTicketBase: eventVipTicketBaseKeypair.publicKey,
+          ticketVault: aliceVipTicketAssociatedTokenPublicKey,
+          attendanceVault: aliceVipAttendanceAssociatedTokenPublicKey,
+        })
+        .signers([aliceKeypair, collaborator1Keypair])
+        .rpc(),
+    ]);
     // assert
     const afterEventGeneralTicketAccount =
       await program.account.eventTicket.fetch(eventGeneralTicketPublicKey);
@@ -558,6 +643,18 @@ describe("disco", () => {
       provider.connection,
       aliceGeneralTicketAssociatedTokenPublicKey
     );
+    const afterEventVipTicketAccount = await program.account.eventTicket.fetch(
+      eventVipTicketPublicKey
+    );
+    const afterAliceVipTicketVaultAccount = await getAccount(
+      provider.connection,
+      aliceVipTicketAssociatedTokenPublicKey
+    );
+    const afterAliceVipAttendanceVaultAccount = await getAccount(
+      provider.connection,
+      aliceVipAttendanceAssociatedTokenPublicKey
+    );
+    // assert for general tickets
     assert.isDefined(beforeEventGeneralTicketAccount);
     assert.isDefined(afterEventGeneralTicketAccount);
     assert.equal(
@@ -569,6 +666,26 @@ describe("disco", () => {
     assert.equal(
       beforeAliceGeneralTicketVaultAccount.amount,
       afterAliceGeneralTicketVaultAccount.amount + BigInt(generalTicketQuantity)
+    );
+
+    // assert for vip tickets
+    assert.isDefined(beforeEventVipTicketAccount);
+    assert.isDefined(afterEventVipTicketAccount);
+    assert.equal(
+      beforeEventVipTicketAccount.used + vipTicketQuantity,
+      afterEventVipTicketAccount.used
+    );
+    assert.isDefined(beforeAliceVipTicketVaultAccount);
+    assert.isDefined(afterAliceVipTicketVaultAccount);
+    assert.equal(
+      beforeAliceVipTicketVaultAccount.amount,
+      afterAliceVipTicketVaultAccount.amount + BigInt(vipTicketQuantity)
+    );
+    assert.isDefined(beforeAliceVipAttendanceVaultAccount);
+    assert.isDefined(afterAliceVipAttendanceVaultAccount);
+    assert.equal(
+      beforeAliceVipTicketVaultAccount.amount,
+      afterAliceVipTicketVaultAccount.amount + BigInt(vipTicketQuantity)
     );
   });
 
@@ -647,5 +764,32 @@ describe("disco", () => {
     // assert
     assert.isDefined(error);
     assert.equal(error.error.errorCode.code, "NotEnoughTicketsAvailable");
+  });
+
+  it("should fail if check-in is called with poap enabled", async () => {
+    // arrange
+    let error: AnchorError;
+    // act
+    try {
+      await program.methods
+        .checkIn(1)
+        .accounts({
+          attendee: aliceKeypair.publicKey,
+          collaboratorBase: collaborator1Keypair.publicKey,
+          eventBase: eventBaseKeypair.publicKey,
+          eventTicketBase: eventVipTicketBaseKeypair.publicKey,
+          ticketVault: aliceVipTicketAssociatedTokenPublicKey,
+        })
+        .signers([aliceKeypair, collaborator1Keypair])
+        .rpc();
+    } catch (err) {
+      error = err;
+    }
+    // assert
+    assert.isDefined(error);
+    assert.equal(
+      error.error.errorCode.code,
+      "CheckInIsOnlyAvailableForTicketsWithoutAttendance"
+    );
   });
 });
