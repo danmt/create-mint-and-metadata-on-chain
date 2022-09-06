@@ -12,12 +12,12 @@ import {
   getAssociatedTokenAddress,
   getMint,
 } from "@solana/spl-token";
-import { BN } from "bn.js";
 import { assert } from "chai";
 import { Disco } from "../target/types/disco";
 import {
   createFundedWallet,
   createMint,
+  createNftWithVerifiedCollection,
   createUserAndAssociatedWallet,
 } from "./utils";
 
@@ -36,7 +36,7 @@ describe("disco", () => {
   );
   const metaplex = Metaplex.make(provider.connection)
     .use(walletAdapterIdentity(provider.wallet))
-    .use(bundlrStorage());
+    .use(bundlrStorage({ address: "https://devnet.bundlr.network" }));
   const aliceBalance = 5000;
   let aliceKeypair: anchor.web3.Keypair;
   let aliceAssociatedWalletPublicKey: anchor.web3.PublicKey;
@@ -52,6 +52,8 @@ describe("disco", () => {
   let vipAttendanceMintPublicKey: anchor.web3.PublicKey;
   let collaborator1PublicKey: anchor.web3.PublicKey;
   let aliceVipAttendanceAssociatedTokenPublicKey: anchor.web3.PublicKey;
+  let collectionPublicKey: anchor.web3.PublicKey;
+  let nftWithVerifiedCollectionPublicKey: anchor.web3.PublicKey;
 
   before(async () => {
     [eventPublicKey] = await anchor.web3.PublicKey.findProgramAddress(
@@ -137,6 +139,8 @@ describe("disco", () => {
         vipAttendanceMintPublicKey,
         aliceKeypair.publicKey
       );
+    [collectionPublicKey, nftWithVerifiedCollectionPublicKey] =
+      await createNftWithVerifiedCollection(metaplex, provider);
   });
 
   it("should create Tomorrowland 2022 event", async () => {
