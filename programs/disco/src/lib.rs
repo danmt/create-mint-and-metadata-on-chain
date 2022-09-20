@@ -111,28 +111,38 @@ pub mod disco {
         Ok(())
     }
 
-    pub fn create_event_ticket(
-        ctx: Context<CreateEventTicket>,
+    pub fn create_ticket_machine(
+        ctx: Context<CreateTicketMachine>,
         ticket_name: String,
         ticket_symbol: String,
         ticket_uri: String,
         ticket_price: u64,
         ticket_quantity: u64,
+        ticket_uses: u64,
     ) -> Result<()> {
-        (*ctx.accounts.event_ticket).name = ticket_name;
-        (*ctx.accounts.event_ticket).symbol = ticket_symbol;
-        (*ctx.accounts.event_ticket).uri = ticket_uri;
-        (*ctx.accounts.event_ticket).quantity = ticket_quantity;
-        (*ctx.accounts.event_ticket).price = ticket_price;
-        (*ctx.accounts.event_ticket).sold = 0;
-        (*ctx.accounts.event_ticket).used = 0;
-        (*ctx.accounts.event_ticket).bump = *ctx.bumps.get("event_ticket").unwrap();
+        (*ctx.accounts.ticket_machine).name = ticket_name;
+        (*ctx.accounts.ticket_machine).symbol = ticket_symbol;
+        (*ctx.accounts.ticket_machine).uri = ticket_uri;
+        (*ctx.accounts.ticket_machine).quantity = ticket_quantity;
+        (*ctx.accounts.ticket_machine).price = ticket_price;
+        (*ctx.accounts.ticket_machine).uses = ticket_uses;
+        (*ctx.accounts.ticket_machine).sold = 0;
+        (*ctx.accounts.ticket_machine).used = 0;
+        (*ctx.accounts.ticket_machine).bump = *ctx.bumps.get("ticket_machine").unwrap();
 
         Ok(())
     }
 
-    pub fn buy_tickets(ctx: Context<BuyTickets>) -> Result<()> {
-        (*ctx.accounts.event_ticket).sold += 1;
+    pub fn mint_ticket(ctx: Context<MintTicket>, ticket_vault_bump: u8) -> Result<()> {
+        (*ctx.accounts.ticket_machine).sold += 1;
+        (*ctx.accounts.ticket).authority = ctx.accounts.authority.key();
+        (*ctx.accounts.ticket).checked_in = false;
+        (*ctx.accounts.ticket).bump = *ctx.bumps.get("ticket").unwrap();
+        (*ctx.accounts.ticket).associated_token_bump = ticket_vault_bump;
+        (*ctx.accounts.ticket).mint_bump = *ctx.bumps.get("ticket_mint").unwrap();
+        (*ctx.accounts.ticket).metadata_bump = *ctx.bumps.get("ticket_metadata").unwrap();
+        (*ctx.accounts.ticket).master_edition_bump =
+            *ctx.bumps.get("ticket_master_edition").unwrap();
 
         // call transfer from authority to event vault
         transfer(
@@ -144,7 +154,7 @@ pub mod disco {
                     authority: ctx.accounts.authority.to_account_info(),
                 },
             ),
-            ctx.accounts.event_ticket.price,
+            ctx.accounts.ticket_machine.price,
         )?;
 
         // call mintTo instruction
@@ -175,18 +185,21 @@ pub mod disco {
                 (*ctx.accounts.event).key(),
                 (*ctx.accounts.authority).key(),
                 (*ctx.accounts.event).key(),
-                (*ctx.accounts.event_ticket).name.clone(),
-                (*ctx.accounts.event_ticket).symbol.clone(),
-                (*ctx.accounts.event_ticket).uri.clone(),
+                (*ctx.accounts.ticket_machine).name.clone(),
+                (*ctx.accounts.ticket_machine).symbol.clone(),
+                (*ctx.accounts.ticket_machine).uri.clone(),
                 None,
                 0,
                 true,
                 true,
                 None,
                 Some(mpl_token_metadata::state::Uses {
-                    remaining: 1,
-                    total: 1,
-                    use_method: mpl_token_metadata::state::UseMethod::Single,
+                    remaining: (*ctx.accounts.ticket_machine).uses,
+                    total: (*ctx.accounts.ticket_machine).uses,
+                    use_method: match (*ctx.accounts.ticket_machine).uses {
+                        1 => mpl_token_metadata::state::UseMethod::Single,
+                        _ => mpl_token_metadata::state::UseMethod::Multiple,
+                    },
                 }),
                 None,
             ),
@@ -252,7 +265,8 @@ pub mod disco {
     }
 
     pub fn check_in(ctx: Context<CheckIn>) -> Result<()> {
-        (*ctx.accounts.event_ticket).used += 1;
+        (*ctx.accounts.ticket_machine).used += 1;
+        (*ctx.accounts.ticket).checked_in = true;
 
         solana_program::program::invoke(
             &mpl_token_metadata::instruction::utilize(
@@ -280,6 +294,20 @@ pub mod disco {
                 ctx.accounts.rent.to_account_info().clone(),
             ],
         )?;
+
+        Ok(())
+    }
+
+    pub fn verify_ticket_ownership(_ctx: Context<VerifyTicketOwnership>) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn set_ticket_authority(
+        ctx: Context<SetTicketAuthority>,
+        new_authority_ticket_vault_bump: u8,
+    ) -> Result<()> {
+        (*ctx.accounts.ticket).authority = ctx.accounts.new_authority.key();
+        (*ctx.accounts.ticket).associated_token_bump = new_authority_ticket_vault_bump;
 
         Ok(())
     }
@@ -445,7 +473,7 @@ pub struct DeleteCollaborator<'info> {
     ticket_price: u64,
     ticket_quantity: u64,
 )]
-pub struct CreateEventTicket<'info> {
+pub struct CreateTicketMachine<'info> {
     /// CHECK: this is verified through an address constraint
     #[account(address = mpl_token_metadata::ID, executable)]
     pub metadata_program: UncheckedAccount<'info>,
@@ -465,23 +493,24 @@ pub struct CreateEventTicket<'info> {
     )]
     pub event: Account<'info, Event>,
     /// CHECK: This is used only for generating the PDA.
-    pub event_ticket_base: UncheckedAccount<'info>,
+    pub ticket_machine_base: UncheckedAccount<'info>,
     #[account(
         init,
         payer = authority,
-        space = EventTicket::SIZE,
+        space = TicketMachine::SIZE,
         seeds = [
-            b"event_ticket".as_ref(),
+            b"ticket_machine".as_ref(),
             event.key().as_ref(),
-            event_ticket_base.key().as_ref(),
+            ticket_machine_base.key().as_ref(),
         ],
         bump
     )]
-    pub event_ticket: Account<'info, EventTicket>,
+    pub ticket_machine: Account<'info, TicketMachine>,
 }
 
 #[derive(Accounts)]
-pub struct BuyTickets<'info> {
+#[instruction(ticket_vault_bump: u8)]
+pub struct MintTicket<'info> {
     /// CHECK: this is verified through an address constraint
     #[account(address = mpl_token_metadata::ID, executable)]
     pub metadata_program: UncheckedAccount<'info>,
@@ -534,18 +563,18 @@ pub struct BuyTickets<'info> {
     )]
     pub event_master_edition: UncheckedAccount<'info>,
     /// CHECK: This is used only for generating the PDA.
-    pub event_ticket_base: UncheckedAccount<'info>,
+    pub ticket_machine_base: UncheckedAccount<'info>,
     #[account(
         mut,
         seeds = [
-            b"event_ticket".as_ref(),
+            b"ticket_machine".as_ref(),
             event.key().as_ref(),
-            event_ticket_base.key().as_ref(),
+            ticket_machine_base.key().as_ref(),
         ],
-        bump = event_ticket.bump,
-        constraint = event_ticket.quantity >= event_ticket.sold + 1 @ ErrorCode::NotEnoughTicketsAvailable
+        bump = ticket_machine.bump,
+        constraint = ticket_machine.quantity >= ticket_machine.sold + 1 @ ErrorCode::NotEnoughTicketsAvailable
     )]
-    pub event_ticket: Box<Account<'info, EventTicket>>,
+    pub ticket_machine: Box<Account<'info, TicketMachine>>,
     #[account(
         mut,
         constraint = buyer_vault.mint == event.accepted_mint
@@ -570,7 +599,7 @@ pub struct BuyTickets<'info> {
         seeds = [
             b"ticket_mint".as_ref(),
             event.key().as_ref(),
-            event_ticket.key().as_ref(),
+            ticket_machine.key().as_ref(),
             ticket_mint_base.key().as_ref()
         ],
         bump
@@ -608,6 +637,17 @@ pub struct BuyTickets<'info> {
         associated_token::mint = ticket_mint,
     )]
     pub ticket_vault: Box<Account<'info, TokenAccount>>,
+    #[account(
+        init,
+        payer = authority,
+        space = Ticket::SIZE,
+        seeds = [
+            b"ticket".as_ref(),
+            ticket_mint.key().as_ref(),
+        ],
+        bump,
+    )]
+    pub ticket: Box<Account<'info, Ticket>>,
 }
 
 #[derive(Accounts)]
@@ -620,8 +660,87 @@ pub struct CheckIn<'info> {
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub rent: Sysvar<'info, Rent>,
     #[account(mut)]
+    pub authority: Signer<'info>,
+    /// CHECK: This is used only for generating the PDA.
+    pub event_base: UncheckedAccount<'info>,
+    #[account(
+        seeds = [
+            b"event".as_ref(),
+            event_base.key().as_ref(),
+        ],
+        bump = event.bump
+    )]
+    pub event: Account<'info, Event>,
+    /// CHECK: This is used only for generating the PDA.
+    pub ticket_machine_base: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        seeds = [
+            b"ticket_machine".as_ref(),
+            event.key().as_ref(),
+            ticket_machine_base.key().as_ref(),
+        ],
+        bump = ticket_machine.bump,
+    )]
+    pub ticket_machine: Account<'info, TicketMachine>,
+    /// CHECK: this is only used to generate a PDA
+    pub ticket_mint_base: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        seeds = [
+            b"ticket_mint".as_ref(),
+            event.key().as_ref(),
+            ticket_machine.key().as_ref(),
+            ticket_mint_base.key().as_ref()
+        ],
+        bump = ticket.mint_bump
+    )]
+    pub ticket_mint: Box<Account<'info, Mint>>,
+    /// CHECK: this will be verified by token metadata program
+    #[account(
+        mut,
+        seeds = [
+            b"metadata".as_ref(),
+            metadata_program.key().as_ref(),
+            ticket_mint.key().as_ref(),
+        ],
+        bump = ticket.metadata_bump,
+        seeds::program = metadata_program.key()
+    )]
+    pub ticket_metadata: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        seeds = [
+            authority.key().as_ref(),
+            token_program.key().as_ref(),
+            ticket_mint.key().as_ref(),
+        ],
+        bump = ticket.associated_token_bump,
+        seeds::program = associated_token_program.key()
+    )]
+    pub ticket_vault: Box<Account<'info, TokenAccount>>,
+    #[account(
+        mut,
+        seeds = [
+            b"ticket".as_ref(),
+            ticket_mint.key().as_ref(),
+        ],
+        bump = ticket.bump,
+        constraint = !ticket.checked_in @ ErrorCode::TicketAlreadyCheckedIn
+    )]
+    pub ticket: Box<Account<'info, Ticket>>,
+}
+
+#[derive(Accounts)]
+pub struct VerifyTicketOwnership<'info> {
+    /// CHECK: this is verified through an address constraint
+    #[account(address = mpl_token_metadata::ID, executable)]
+    pub metadata_program: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub rent: Sysvar<'info, Rent>,
     pub collaborator_base: Signer<'info>,
-    #[account(mut)]
     pub authority: Signer<'info>,
     /// CHECK: This is used only for generating the PDA.
     pub event_base: UncheckedAccount<'info>,
@@ -639,58 +758,84 @@ pub struct CheckIn<'info> {
             event.key().as_ref(),
             collaborator_base.key().as_ref(),
         ],
-        bump
+        bump = collaborator.bump
     )]
     pub collaborator: Account<'info, Collaborator>,
     /// CHECK: This is used only for generating the PDA.
-    pub event_ticket_base: UncheckedAccount<'info>,
+    pub ticket_machine_base: UncheckedAccount<'info>,
     #[account(
-        mut,
         seeds = [
-            b"event_ticket".as_ref(),
+            b"ticket_machine".as_ref(),
             event.key().as_ref(),
-            event_ticket_base.key().as_ref(),
+            ticket_machine_base.key().as_ref(),
         ],
-        bump = event_ticket.bump,
-        constraint = event_ticket.sold - event_ticket.used >= 1 @ ErrorCode::TicketAlreadyCheckedIn
+        bump = ticket_machine.bump,
     )]
-    pub event_ticket: Account<'info, EventTicket>,
+    pub ticket_machine: Account<'info, TicketMachine>,
     /// CHECK: this is only used to generate a PDA
     pub ticket_mint_base: UncheckedAccount<'info>,
     #[account(
-        mut,
         seeds = [
             b"ticket_mint".as_ref(),
             event.key().as_ref(),
-            event_ticket.key().as_ref(),
+            ticket_machine.key().as_ref(),
             ticket_mint_base.key().as_ref()
         ],
-        bump
+        bump = ticket.mint_bump
     )]
     pub ticket_mint: Box<Account<'info, Mint>>,
-    /// CHECK: this will be verified by token metadata program
     #[account(
-        mut,
         seeds = [
-            b"metadata".as_ref(),
-            metadata_program.key().as_ref(),
+            b"ticket".as_ref(),
             ticket_mint.key().as_ref(),
         ],
-        bump,
-        seeds::program = metadata_program.key()
+        bump = ticket.bump,
+        constraint = ticket.authority == authority.key() @ ErrorCode::InvalidAuthorityForTicket
     )]
-    pub ticket_metadata: UncheckedAccount<'info>,
+    pub ticket: Box<Account<'info, Ticket>>,
     #[account(
-        mut,
         seeds = [
             authority.key().as_ref(),
             token_program.key().as_ref(),
             ticket_mint.key().as_ref(),
         ],
-        bump,
-        seeds::program = associated_token_program.key()
+        bump = ticket.associated_token_bump,
+        seeds::program = associated_token_program.key(),
+        constraint = ticket_vault.amount > 0 @ ErrorCode::InvalidAuthorityForTicket,
     )]
     pub ticket_vault: Box<Account<'info, TokenAccount>>,
+}
+
+#[derive(Accounts)]
+#[instruction(new_authority_ticket_vault_bump: u8)]
+pub struct SetTicketAuthority<'info> {
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub authority: Signer<'info>,
+    /// CHECK: new authority can be anything.
+    pub new_authority: UncheckedAccount<'info>,
+    pub ticket_mint: Box<Account<'info, Mint>>,
+    #[account(
+        mut,
+        seeds = [
+            b"ticket".as_ref(),
+            ticket_mint.key().as_ref(),
+        ],
+        bump = ticket.bump,
+        constraint = ticket.authority == authority.key() @ ErrorCode::OnlyTicketAuthorityCanChangeAuthority,
+        constraint = !ticket.checked_in @ ErrorCode::CheckedInTicketsCantChangeAuthority,
+    )]
+    pub ticket: Box<Account<'info, Ticket>>,
+    #[account(
+        seeds = [
+            new_authority.key().as_ref(),
+            token_program.key().as_ref(),
+            ticket_mint.key().as_ref(),
+        ],
+        bump = new_authority_ticket_vault_bump,
+        seeds::program = associated_token_program.key()
+    )]
+    pub new_authority_ticket_vault: Box<Account<'info, TokenAccount>>,
 }
 
 #[account]
@@ -718,7 +863,7 @@ impl Collaborator {
 }
 
 #[account]
-pub struct EventTicket {
+pub struct TicketMachine {
     pub name: String,   // 32
     pub symbol: String, // 10
     pub uri: String,    // 200
@@ -726,11 +871,27 @@ pub struct EventTicket {
     pub quantity: u64,
     pub sold: u64,
     pub used: u64,
+    pub uses: u64,
     pub bump: u8,
 }
 
-impl EventTicket {
-    pub const SIZE: usize = 8 + 36 + 204 + 14 + 8 + 8 + 8 + 8 + 1;
+impl TicketMachine {
+    pub const SIZE: usize = 8 + 36 + 204 + 14 + 8 + 8 + 8 + 8 + 8 + 1;
+}
+
+#[account]
+pub struct Ticket {
+    pub authority: Pubkey,
+    pub checked_in: bool,
+    pub bump: u8,
+    pub associated_token_bump: u8,
+    pub mint_bump: u8,
+    pub metadata_bump: u8,
+    pub master_edition_bump: u8,
+}
+
+impl Ticket {
+    pub const SIZE: usize = 8 + 32 + 1 + 1 + 1 + 1 + 1 + 1;
 }
 
 #[error_code]
@@ -743,4 +904,10 @@ pub enum ErrorCode {
     OnlyEventAuthorityCanCreateCollaborators,
     #[msg("Only event authority can delete collaborators.")]
     OnlyEventAuthorityCanDeleteCollaborators,
+    #[msg("The authority is not registered as the authority of the ticket.")]
+    InvalidAuthorityForTicket,
+    #[msg("The only the authority of the ticket can set a new authority.")]
+    OnlyTicketAuthorityCanChangeAuthority,
+    #[msg("Ticket that have already been checked in can't change authority.")]
+    CheckedInTicketsCantChangeAuthority,
 }
