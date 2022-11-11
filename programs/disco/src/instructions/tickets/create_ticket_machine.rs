@@ -11,7 +11,9 @@ use {
     ticket_uri: String,
     ticket_price: u64,
     ticket_quantity: u64,
-    event_id: String
+    ticket_uses: u64,
+    event_id: String,
+    ticket_id: String
 )]
 pub struct CreateTicketMachine<'info> {
     /// CHECK: this is verified through an address constraint
@@ -22,19 +24,16 @@ pub struct CreateTicketMachine<'info> {
     pub rent: Sysvar<'info, Rent>,
     #[account(mut)]
     pub authority: Signer<'info>,
-    /// CHECK: This is used only for generating the PDA.
-    pub event_base: UncheckedAccount<'info>,
+    /// Event
     #[account(
         seeds = [
             b"event".as_ref(),
-            event_base.key().as_ref(),
             event_id.as_bytes(),
         ],
         bump = event.bump
     )]
     pub event: Account<'info, Event>,
-    /// CHECK: This is used only for generating the PDA.
-    pub ticket_machine_base: UncheckedAccount<'info>,
+    /// Ticket Machine
     #[account(
         init,
         payer = authority,
@@ -42,7 +41,7 @@ pub struct CreateTicketMachine<'info> {
         seeds = [
             b"ticket_machine".as_ref(),
             event.key().as_ref(),
-            ticket_machine_base.key().as_ref(),
+            ticket_id.as_bytes(),
         ],
         bump
     )]

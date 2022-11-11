@@ -16,16 +16,14 @@ pub struct CreateEvent<'info> {
     pub rent: Sysvar<'info, Rent>,
     #[account(mut)]
     pub authority: Signer<'info>,
-    /// CHECK: This is used only for generating the PDA.
-    pub event_base: UncheckedAccount<'info>,
+    // Event account
     #[account(
         init,
         payer = authority,
         space = Event::SIZE,
         seeds = [
             b"event".as_ref(),
-            event_base.key().as_ref(),
-            event_id.as_bytes()
+            event_id.as_bytes() //firebase id
         ],
         bump
     )]
@@ -114,7 +112,6 @@ pub fn handle(
 
     let seeds = &[
         b"event".as_ref(),
-        ctx.accounts.event_base.to_account_info().key.as_ref(),
         event_id.as_bytes(),
         &[ctx.accounts.event.bump],
     ];

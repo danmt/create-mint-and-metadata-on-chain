@@ -7,7 +7,7 @@ use {
 };
 
 #[derive(Accounts)]
-#[instruction(event_id: String)]
+#[instruction(event_id: String, ticket_machine_id: String, ticket_mint_id: String)]
 pub struct CheckIn<'info> {
     /// CHECK: this is verified through an address constraint
     #[account(address = mpl_token_metadata::ID, executable)]
@@ -18,38 +18,34 @@ pub struct CheckIn<'info> {
     pub rent: Sysvar<'info, Rent>,
     #[account(mut)]
     pub authority: Signer<'info>,
-    /// CHECK: This is used only for generating the PDA.
-    pub event_base: UncheckedAccount<'info>,
+    /// Event account
     #[account(
         seeds = [
             b"event".as_ref(),
-            event_base.key().as_ref(),
             event_id.as_bytes()
         ],
         bump = event.bump
     )]
     pub event: Account<'info, Event>,
-    /// CHECK: This is used only for generating the PDA.
-    pub ticket_machine_base: UncheckedAccount<'info>,
+    /// Ticket Machine
     #[account(
         mut,
         seeds = [
             b"ticket_machine".as_ref(),
             event.key().as_ref(),
-            ticket_machine_base.key().as_ref(),
+            ticket_machine_id.as_bytes(),
         ],
         bump = ticket_machine.bump,
     )]
     pub ticket_machine: Account<'info, TicketMachine>,
-    /// CHECK: this is only used to generate a PDA
-    pub ticket_mint_base: UncheckedAccount<'info>,
+    /// Ticket mint
     #[account(
         mut,
         seeds = [
             b"ticket_mint".as_ref(),
             event.key().as_ref(),
             ticket_machine.key().as_ref(),
-            ticket_mint_base.key().as_ref()
+            ticket_mint_id.as_bytes()
         ],
         bump = ticket.mint_bump
     )]

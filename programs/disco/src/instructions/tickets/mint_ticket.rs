@@ -12,7 +12,7 @@ use {
 };
 
 #[derive(Accounts)]
-#[instruction(ticket_vault_bump: u8, event_id: String)]
+#[instruction(ticket_vault_bump: u8, event_id: String, ticket_machine_id: String, ticket_mint_id: String)]
 pub struct MintTicket<'info> {
     /// CHECK: this is verified through an address constraint
     #[account(address = mpl_token_metadata::ID, executable)]
@@ -23,13 +23,10 @@ pub struct MintTicket<'info> {
     pub rent: Sysvar<'info, Rent>,
     #[account(mut)]
     pub authority: Signer<'info>,
-    /// CHECK: This is used only for generating the PDA.
-    pub event_base: UncheckedAccount<'info>,
     #[account(
         mut,
         seeds = [
             b"event".as_ref(),
-            event_base.key().as_ref(),
             event_id.as_bytes()
         ],
         bump = event.bump
@@ -66,14 +63,13 @@ pub struct MintTicket<'info> {
         seeds::program = metadata_program.key()
     )]
     pub event_master_edition: UncheckedAccount<'info>,
-    /// CHECK: This is used only for generating the PDA.
-    pub ticket_machine_base: UncheckedAccount<'info>,
+    /// Ticket Machine
     #[account(
         mut,
         seeds = [
             b"ticket_machine".as_ref(),
             event.key().as_ref(),
-            ticket_machine_base.key().as_ref(),
+            ticket_machine_id.as_bytes(),
         ],
         bump = ticket_machine.bump,
         constraint = ticket_machine.quantity >= ticket_machine.sold + 1 @ ErrorCode::NotEnoughTicketsAvailable
@@ -93,8 +89,7 @@ pub struct MintTicket<'info> {
         bump = event.event_vault_bump
     )]
     pub event_vault: Box<Account<'info, TokenAccount>>,
-    /// CHECK: This is used only for generating the PDA.
-    pub ticket_mint_base: UncheckedAccount<'info>,
+    /// Ticket Mint
     #[account(
         init,
         payer = authority,
@@ -105,7 +100,7 @@ pub struct MintTicket<'info> {
             b"ticket_mint".as_ref(),
             event.key().as_ref(),
             ticket_machine.key().as_ref(),
-            ticket_mint_base.key().as_ref()
+            ticket_mint_id.as_bytes()
         ],
         bump
     )]
@@ -155,7 +150,7 @@ pub struct MintTicket<'info> {
     pub ticket: Box<Account<'info, Ticket>>,
 }
 
-pub fn handle(ctx: Context<MintTicket>, ticket_vault_bump: u8) -> Result<()> {
+pub fn handle(ctx: Context<MintTicket>, ticket_vault_bump: u8, event_id: String) -> Result<()> {
     (*ctx.accounts.ticket_machine).sold += 1;
     (*ctx.accounts.ticket).authority = ctx.accounts.authority.key();
     (*ctx.accounts.ticket).checked_in = false;
@@ -182,7 +177,7 @@ pub fn handle(ctx: Context<MintTicket>, ticket_vault_bump: u8) -> Result<()> {
     // call mintTo instruction
     let seeds = &[
         b"event".as_ref(),
-        ctx.accounts.event_base.to_account_info().key.as_ref(),
+        event_id.as_bytes(),
         &[ctx.accounts.event.bump],
     ];
 
