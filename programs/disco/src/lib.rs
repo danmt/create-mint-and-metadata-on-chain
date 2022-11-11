@@ -21,11 +21,11 @@ pub mod disco {
        instructions::events::create_event::handle(ctx, event_name, event_symbol, event_uri, event_id)
     }
 
-    pub fn create_collaborator(ctx: Context<CreateCollaborator>) -> Result<()> {
+    pub fn create_collaborator(ctx: Context<CreateCollaborator>, _event_id: String ) -> Result<()> {
         instructions::collaborators::create_collaborator::handle(ctx)
     }
 
-    pub fn delete_collaborator(ctx: Context<DeleteCollaborator>) -> Result<()> {
+    pub fn delete_collaborator(ctx: Context<DeleteCollaborator>, _event_id: String) -> Result<()> {
         instructions::collaborators::delete_collaborator::handle(ctx)
     }
 
@@ -37,19 +37,20 @@ pub mod disco {
         ticket_price: u64,
         ticket_quantity: u64,
         ticket_uses: u64,
+        _event_id: String
     ) -> Result<()> {
         instructions::tickets::create_ticket_machine::handle(ctx, ticket_name, ticket_symbol, ticket_uri, ticket_price, ticket_quantity, ticket_uses)
     }
 
-    pub fn mint_ticket(ctx: Context<MintTicket>, ticket_vault_bump: u8) -> Result<()> {
+    pub fn mint_ticket(ctx: Context<MintTicket>, ticket_vault_bump: u8, _event_id: String) -> Result<()> {
         instructions::tickets::mint_ticket::handle(ctx, ticket_vault_bump)
     }
 
-    pub fn check_in(ctx: Context<CheckIn>) -> Result<()> {
+    pub fn check_in(ctx: Context<CheckIn>, _event_id: String) -> Result<()> {
         instructions::events::check_in::handle(ctx)
     }
 
-    pub fn verify_ticket_ownership(ctx: Context<VerifyTicketOwnership>) -> Result<()> {
+    pub fn verify_ticket_ownership(ctx: Context<VerifyTicketOwnership>, _event_id: String) -> Result<()> {
         instructions::tickets::verify_ticket_ownership::handle(ctx)
     }
 

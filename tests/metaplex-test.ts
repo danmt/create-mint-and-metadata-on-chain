@@ -54,10 +54,11 @@ describe("disco", () => {
 
   let eventMintPublicKey: anchor.web3.PublicKey;
   let eventMetadataPublicKey: anchor.web3.PublicKey;
+  const eventId= "EventId"
 
   before(async () => {
     [eventPublicKey] = await anchor.web3.PublicKey.findProgramAddress(
-      [Buffer.from("event", "utf-8"), eventBaseKeypair.publicKey.toBuffer()],
+      [Buffer.from("event", "utf-8"), eventBaseKeypair.publicKey.toBuffer(), Buffer.from(eventId, "utf-8")],
       program.programId
     );
     [eventMintPublicKey] = await anchor.web3.PublicKey.findProgramAddress(
@@ -145,8 +146,8 @@ describe("disco", () => {
     const eventSymbol = "TMRL2022";
     const eventUri = "www.google.com";
     // act
-    await program.methods
-      .createEvent(eventName, eventSymbol, eventUri)
+      await program.methods
+      .createEvent(eventName, eventSymbol, eventUri, eventId)
       .accounts({
         authority: provider.wallet.publicKey,
         eventBase: eventBaseKeypair.publicKey,
@@ -173,6 +174,7 @@ describe("disco", () => {
     assert.equal(eventCollectionNftAccount.name, eventName);
     assert.equal(eventCollectionNftAccount.symbol, eventSymbol);
     assert.equal(eventCollectionNftAccount.uri, eventUri);
+    
   });
 
   it("should create and delete collaborators", async () => {
@@ -188,32 +190,43 @@ describe("disco", () => {
         program.programId
       );
     // act
-    await Promise.all([
-      program.methods
-        .createCollaborator()
-        .accounts({
-          authority: provider.wallet.publicKey,
-          eventBase: eventBaseKeypair.publicKey,
-          collaboratorBase: collaborator1Keypair.publicKey,
-        })
-        .rpc(),
-      program.methods
-        .createCollaborator()
-        .accounts({
-          authority: provider.wallet.publicKey,
-          eventBase: eventBaseKeypair.publicKey,
-          collaboratorBase: collaborator2Keypair.publicKey,
-        })
-        .rpc(),
-    ]);
-    await program.methods
-      .deleteCollaborator()
+
+    try {
+      await Promise.all([
+        program.methods
+          .createCollaborator(eventId)
+          .accounts({
+            authority: provider.wallet.publicKey,
+            eventBase: eventBaseKeypair.publicKey,
+            collaboratorBase: collaborator1Keypair.publicKey,
+          })
+          .rpc(),
+        program.methods
+          .createCollaborator(eventId)
+          .accounts({
+            authority: provider.wallet.publicKey,
+            eventBase: eventBaseKeypair.publicKey,
+            collaboratorBase: collaborator2Keypair.publicKey,
+          })
+          .rpc(),
+      ]);
+    }catch(err){
+      console.log(err)
+    }
+    
+    try{
+      await program.methods
+      .deleteCollaborator(eventId)
       .accounts({
         authority: provider.wallet.publicKey,
         eventBase: eventBaseKeypair.publicKey,
         collaboratorBase: collaborator2Keypair.publicKey,
       })
       .rpc();
+    } catch(err){
+      console.log(err)
+    }
+    
     // assert
     const collaborator1Account = await program.account.collaborator.fetch(
       collaborator1PublicKey
@@ -231,7 +244,7 @@ describe("disco", () => {
     let error: AnchorError;
     // act
     await program.methods
-      .createEvent("fakeEvent", "FAKE", "news.com")
+      .createEvent("fakeEvent", "FAKE", "news.com", eventId)
       .accounts({
         authority: provider.wallet.publicKey,
         eventBase: eventBaseKeypair.publicKey,
@@ -241,7 +254,7 @@ describe("disco", () => {
       .rpc();
     try {
       await program.methods
-        .createCollaborator()
+        .createCollaborator(eventId)
         .accounts({
           authority: aliceKeypair.publicKey,
           eventBase: eventBaseKeypair.publicKey,
@@ -266,8 +279,9 @@ describe("disco", () => {
     const collaboratorKeypair = anchor.web3.Keypair.generate();
     let error: AnchorError;
     // act
-    await program.methods
-      .createEvent("fakeEvent", "FAKE", "news.com")
+    try{
+      await program.methods
+      .createEvent("fakeEvent", "FAKE", "news.com", eventId)
       .accounts({
         authority: provider.wallet.publicKey,
         eventBase: eventBaseKeypair.publicKey,
@@ -275,8 +289,12 @@ describe("disco", () => {
         metadataProgram: metadataProgramPublicKey,
       })
       .rpc();
+    } catch(error){
+      console.log(error)
+    }
+    
     await program.methods
-      .createCollaborator()
+      .createCollaborator(eventId)
       .accounts({
         authority: provider.wallet.publicKey,
         eventBase: eventBaseKeypair.publicKey,
@@ -285,7 +303,7 @@ describe("disco", () => {
       .rpc();
     try {
       await program.methods
-        .deleteCollaborator()
+        .deleteCollaborator(eventId)
         .accounts({
           authority: aliceKeypair.publicKey,
           eventBase: eventBaseKeypair.publicKey,
@@ -312,14 +330,16 @@ describe("disco", () => {
     const ticketPrice = 5;
     const ticketQuantity = 30;
     // act
-    await program.methods
+    try {
+      await program.methods
       .createTicketMachine(
         ticketName,
         ticketSymbol,
         ticketURI,
         new BN(ticketPrice),
         new BN(ticketQuantity),
-        new BN(1)
+        new BN(1),
+        eventId
       )
       .accounts({
         authority: provider.wallet.publicKey,
@@ -328,6 +348,10 @@ describe("disco", () => {
         metadataProgram: metadataProgramPublicKey,
       })
       .rpc();
+    }catch(err){
+      console.log(err)
+    }
+    
     // assert
     const eventGeneralTicketAccount = await program.account.ticketMachine.fetch(
       eventGeneralTicketPublicKey
@@ -357,7 +381,8 @@ describe("disco", () => {
         ticketURI,
         new BN(ticketPrice),
         new BN(ticketQuantity),
-        new BN(vipTicketUses)
+        new BN(vipTicketUses),
+        eventId
       )
       .accounts({
         authority: provider.wallet.publicKey,
@@ -537,7 +562,7 @@ describe("disco", () => {
     // act
     await Promise.all([
       program.methods
-        .mintTicket(aliceGeneralTicket1AssociatedTokenBump)
+        .mintTicket(aliceGeneralTicket1AssociatedTokenBump, eventId)
         .accounts({
           authority: aliceKeypair.publicKey,
           eventBase: eventBaseKeypair.publicKey,
@@ -550,7 +575,7 @@ describe("disco", () => {
         .signers([aliceKeypair])
         .rpc(),
       program.methods
-        .mintTicket(aliceGeneralTicket2AssociatedTokenBump)
+        .mintTicket(aliceGeneralTicket2AssociatedTokenBump, eventId)
         .accounts({
           authority: aliceKeypair.publicKey,
           eventBase: eventBaseKeypair.publicKey,
@@ -563,7 +588,7 @@ describe("disco", () => {
         .signers([aliceKeypair])
         .rpc(),
       program.methods
-        .mintTicket(aliceGeneralTicket3AssociatedTokenBump)
+        .mintTicket(aliceGeneralTicket3AssociatedTokenBump, eventId)
         .accounts({
           authority: aliceKeypair.publicKey,
           eventBase: eventBaseKeypair.publicKey,
@@ -576,7 +601,7 @@ describe("disco", () => {
         .signers([aliceKeypair])
         .rpc(),
       program.methods
-        .mintTicket(aliceVipTicket1AssociatedTokenBump)
+        .mintTicket(aliceVipTicket1AssociatedTokenBump, eventId)
         .accounts({
           authority: aliceKeypair.publicKey,
           eventBase: eventBaseKeypair.publicKey,
@@ -589,7 +614,7 @@ describe("disco", () => {
         .signers([aliceKeypair])
         .rpc(),
       program.methods
-        .mintTicket(aliceVipTicket2AssociatedTokenBump)
+        .mintTicket(aliceVipTicket2AssociatedTokenBump, eventId)
         .accounts({
           authority: aliceKeypair.publicKey,
           eventBase: eventBaseKeypair.publicKey,
@@ -861,7 +886,7 @@ describe("disco", () => {
       );
     // act
     await program.methods
-      .checkIn()
+      .checkIn(eventId)
       .accounts({
         authority: aliceKeypair.publicKey,
         eventBase: eventBaseKeypair.publicKey,
@@ -888,7 +913,7 @@ describe("disco", () => {
     // arrange
     // act
     await program.methods
-      .verifyTicketOwnership()
+      .verifyTicketOwnership(eventId)
       .accounts({
         authority: aliceKeypair.publicKey,
         collaboratorBase: collaborator1Keypair.publicKey,
@@ -971,7 +996,7 @@ describe("disco", () => {
     // act
     try {
       await program.methods
-        .verifyTicketOwnership()
+        .verifyTicketOwnership(eventId)
         .accounts({
           authority: provider.wallet.publicKey,
           collaboratorBase: collaborator1Keypair.publicKey,
@@ -1031,7 +1056,7 @@ describe("disco", () => {
     // act
     try {
       await program.methods
-        .mintTicket(aliceUltraVipTicket1AssociatedTokenBump)
+        .mintTicket(aliceUltraVipTicket1AssociatedTokenBump, eventId)
         .accounts({
           authority: aliceKeypair.publicKey,
           eventBase: eventBaseKeypair.publicKey,
@@ -1049,7 +1074,8 @@ describe("disco", () => {
               ticketURI,
               new BN(ticketPrice),
               new BN(0),
-              new BN(1)
+              new BN(1),
+              eventId
             )
             .accounts({
               authority: provider.wallet.publicKey,
@@ -1111,7 +1137,7 @@ describe("disco", () => {
 
     // act
     await program.methods
-      .checkIn()
+      .checkIn(eventId)
       .accounts({
         authority: aliceKeypair.publicKey,
         eventBase: eventBaseKeypair.publicKey,
@@ -1128,7 +1154,8 @@ describe("disco", () => {
             ticketURI,
             new BN(ticketPrice),
             new BN(5),
-            new BN(1)
+            new BN(1),
+            eventId
           )
           .accounts({
             authority: provider.wallet.publicKey,
@@ -1138,7 +1165,7 @@ describe("disco", () => {
           })
           .instruction(),
         await program.methods
-          .mintTicket(aliceUltraVipTicket1AssociatedTokenBump)
+          .mintTicket(aliceUltraVipTicket1AssociatedTokenBump, eventId)
           .accounts({
             authority: aliceKeypair.publicKey,
             eventBase: eventBaseKeypair.publicKey,
@@ -1155,7 +1182,7 @@ describe("disco", () => {
 
     try {
       await program.methods
-        .checkIn()
+        .checkIn(eventId)
         .accounts({
           authority: aliceKeypair.publicKey,
           eventBase: eventBaseKeypair.publicKey,
@@ -1227,7 +1254,7 @@ describe("disco", () => {
 
     // act
     await program.methods
-      .checkIn()
+      .checkIn(eventId)
       .accounts({
         authority: aliceKeypair.publicKey,
         eventBase: eventBaseKeypair.publicKey,
@@ -1244,7 +1271,8 @@ describe("disco", () => {
             ticketURI,
             new BN(ticketPrice),
             new BN(5),
-            new BN(1)
+            new BN(1),
+            eventId
           )
           .accounts({
             authority: provider.wallet.publicKey,
@@ -1254,7 +1282,7 @@ describe("disco", () => {
           })
           .instruction(),
         await program.methods
-          .mintTicket(aliceUltraVipTicket1AssociatedTokenBump)
+          .mintTicket(aliceUltraVipTicket1AssociatedTokenBump, eventId)
           .accounts({
             authority: aliceKeypair.publicKey,
             eventBase: eventBaseKeypair.publicKey,

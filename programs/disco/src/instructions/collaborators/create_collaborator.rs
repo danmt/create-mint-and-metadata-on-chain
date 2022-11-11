@@ -5,6 +5,7 @@ use {
 };
 
 #[derive(Accounts)]
+#[instruction(event_id: String)]
 pub struct CreateCollaborator<'info> {
     pub system_program: Program<'info, System>,
     #[account(mut)]
@@ -15,6 +16,7 @@ pub struct CreateCollaborator<'info> {
         seeds = [
             b"event".as_ref(),
             event_base.key().as_ref(),
+            event_id.as_bytes()
         ],
         bump = event.bump,
         constraint = event.authority == authority.key() @ ErrorCode::OnlyEventAuthorityCanCreateCollaborators
@@ -38,7 +40,7 @@ pub struct CreateCollaborator<'info> {
 }
 
 pub fn handle(
-    ctx: Context<CreateCollaborator>,
+    ctx: Context<CreateCollaborator>
   ) -> Result<()> {
     msg!("Creating Collaborator...");
     ctx.accounts.collaborator.bump = *ctx.bumps.get("collaborator").unwrap();

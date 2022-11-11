@@ -5,6 +5,7 @@ use {
 };
 
 #[derive(Accounts)]
+#[instruction(event_id: String)]
 pub struct DeleteCollaborator<'info> {
     pub system_program: Program<'info, System>,
     #[account(mut)]
@@ -15,6 +16,7 @@ pub struct DeleteCollaborator<'info> {
         seeds = [
             b"event".as_ref(),
             event_base.key().as_ref(),
+            event_id.as_bytes()
         ],
         bump = event.bump,
         constraint = event.authority == authority.key() @ ErrorCode::OnlyEventAuthorityCanDeleteCollaborators

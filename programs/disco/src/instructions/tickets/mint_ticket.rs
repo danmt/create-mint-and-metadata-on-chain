@@ -12,7 +12,7 @@ use {
 };
 
 #[derive(Accounts)]
-#[instruction(ticket_vault_bump: u8)]
+#[instruction(ticket_vault_bump: u8, event_id: String)]
 pub struct MintTicket<'info> {
     /// CHECK: this is verified through an address constraint
     #[account(address = mpl_token_metadata::ID, executable)]
@@ -30,6 +30,7 @@ pub struct MintTicket<'info> {
         seeds = [
             b"event".as_ref(),
             event_base.key().as_ref(),
+            event_id.as_bytes()
         ],
         bump = event.bump
     )]
@@ -99,6 +100,7 @@ pub struct MintTicket<'info> {
         payer = authority,
         mint::decimals = 0,
         mint::authority = event,
+        mint::freeze_authority = event,
         seeds = [
             b"ticket_mint".as_ref(),
             event.key().as_ref(),

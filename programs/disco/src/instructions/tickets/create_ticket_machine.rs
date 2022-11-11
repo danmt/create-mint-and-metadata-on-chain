@@ -11,6 +11,7 @@ use {
     ticket_uri: String,
     ticket_price: u64,
     ticket_quantity: u64,
+    event_id: String
 )]
 pub struct CreateTicketMachine<'info> {
     /// CHECK: this is verified through an address constraint
@@ -27,6 +28,7 @@ pub struct CreateTicketMachine<'info> {
         seeds = [
             b"event".as_ref(),
             event_base.key().as_ref(),
+            event_id.as_bytes(),
         ],
         bump = event.bump
     )]

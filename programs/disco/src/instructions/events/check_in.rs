@@ -7,6 +7,7 @@ use {
 };
 
 #[derive(Accounts)]
+#[instruction(event_id: String)]
 pub struct CheckIn<'info> {
     /// CHECK: this is verified through an address constraint
     #[account(address = mpl_token_metadata::ID, executable)]
@@ -23,6 +24,7 @@ pub struct CheckIn<'info> {
         seeds = [
             b"event".as_ref(),
             event_base.key().as_ref(),
+            event_id.as_bytes()
         ],
         bump = event.bump
     )]

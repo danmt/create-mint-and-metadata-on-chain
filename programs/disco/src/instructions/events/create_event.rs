@@ -25,7 +25,7 @@ pub struct CreateEvent<'info> {
         seeds = [
             b"event".as_ref(),
             event_base.key().as_ref(),
-            event_id.as_ref()
+            event_id.as_bytes()
         ],
         bump
     )]
@@ -48,6 +48,7 @@ pub struct CreateEvent<'info> {
         payer = authority,
         mint::decimals = 0,
         mint::authority = event,
+        mint::freeze_authority = event,
         seeds = [
             b"event_mint".as_ref(),
             event.key().as_ref(),
@@ -114,7 +115,7 @@ pub fn handle(
     let seeds = &[
         b"event".as_ref(),
         ctx.accounts.event_base.to_account_info().key.as_ref(),
-        event_id.as_ref(),
+        event_id.as_bytes(),
         &[ctx.accounts.event.bump],
     ];
 
@@ -133,22 +134,22 @@ pub fn handle(
 
     solana_program::program::invoke_signed(
         &mpl_token_metadata::instruction::create_metadata_accounts_v3(
-            mpl_token_metadata::ID,
-            (*ctx.accounts.event_metadata).key(),
-            ctx.accounts.event_mint.key(),
-            ctx.accounts.event.key(),
-            (*ctx.accounts.authority).key(),
-            ctx.accounts.event.key(),
-            event_name,
-            event_symbol,
-            event_uri,
-            None,
-            0,
-            true,
-            true,
-            None,
-            None,
-            None,
+            mpl_token_metadata::ID, //program_id
+            (*ctx.accounts.event_metadata).key(), //metadata_account
+            ctx.accounts.event_mint.key(), //mint
+            ctx.accounts.event.key(), //mint_authority
+            (*ctx.accounts.authority).key(), //payer
+            ctx.accounts.event.key(), //update_authority
+            event_name, //name
+            event_symbol, //symbol
+            event_uri, //uri
+            None, //creators
+            0, //seller_fee_basis_points
+            true, //update_authority_is_signer
+            true, //is_mutable
+            None, //collection
+            None, //uses
+            None, //collection_details
         ),
         &[
             ctx.accounts.event_metadata.to_account_info().clone(),
@@ -163,14 +164,14 @@ pub fn handle(
 
     solana_program::program::invoke_signed(
         &mpl_token_metadata::instruction::create_master_edition_v3(
-            mpl_token_metadata::ID,
-            (*ctx.accounts.event_master_edition).key(),
-            ctx.accounts.event_mint.key(),
-            ctx.accounts.event.key(),
-            ctx.accounts.event.key(),
-            ctx.accounts.event_metadata.key(),
-            (*ctx.accounts.authority).key(),
-            Some(0),
+            mpl_token_metadata::ID, //program_id
+            (*ctx.accounts.event_master_edition).key(), //edition
+            ctx.accounts.event_mint.key(), //mint
+            ctx.accounts.event.key(), //update_authority
+            ctx.accounts.event.key(), //mint_authority
+            ctx.accounts.event_metadata.key(), //metadata
+            (*ctx.accounts.authority).key(), //payer
+            Some(0), //max_supply
         ),
         &[
             ctx.accounts.event_master_edition.to_account_info().clone(),
